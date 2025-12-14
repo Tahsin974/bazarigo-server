@@ -24,6 +24,7 @@ CREATE TABLE products (
     isLimitedStock BOOLEAN DEFAULT FALSE,
     isExclusive BOOLEAN DEFAULT FALSE,
     isFlashSale BOOLEAN DEFAULT FALSE,
+    canDeleteByModerator BOOLEAN DEFAULT FALSE,
     category VARCHAR(100),
     subcategory VARCHAR(100),
     description TEXT,
@@ -33,11 +34,13 @@ CREATE TABLE products (
     images TEXT[],
     extras JSONB,
     reviews JSONB[] DEFAULT '{}',
+    questions JSONB[] DEFAULT '{}',
     createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updatedAt TIMESTAMP DEFAULT NULL,
     seller_id VARCHAR(100),
     seller_name VARCHAR(150),
-    seller_store_name VARCHAR(150)
+    seller_store_name VARCHAR(150),
+    seller_role VARCHAR(50) ,
 );
 
 
@@ -63,6 +66,8 @@ CREATE TABLE sellers (
     date_of_birth TIMESTAMP,
     gender TEXT,
     img TEXT,
+    store_img TEXT,
+
     nid_number VARCHAR(50),
     store_name VARCHAR(255) DEFAULT NULL,
     product_category VARCHAR(255) DEFAULT NULL,
@@ -84,7 +89,9 @@ CREATE TABLE sellers (
     updated_at TIMESTAMP DEFAULT NULL,
     status VARCHAR(50) DEFAULT 'pending',
     last_login TIMESTAMP DEFAULT NULL,
-    role VARCHAR(50) DEFAULT NULL
+    role VARCHAR(50) DEFAULT NULL,
+    reviews JSONB[] DEFAULT '{}',
+
 );
 
 -- Users Table
@@ -262,9 +269,30 @@ CREATE TABLE payments (
       payment_method VARCHAR(100),
       status VARCHAR(50) DEFAULT 'pending',
       phone_number VARCHAR(50) DEFAULT NULL
- 
-
 );
+
+-- Payments Table
+
+
+CREATE TABLE sellerpayments (
+    id SERIAL PRIMARY KEY,
+    seller_id VARCHAR(255) NOT NULL,
+    seller_name VARCHAR(20) NOT NULL,
+    seller_store_name VARCHAR(20) NOT NULL,
+    amount NUMERIC(10,2) NOT NULL,
+    payment_method TEXT NOT NULL,
+    mobile_bank_name TEXT,
+    transaction_id TEXT,
+    mobile_bank_account_number TEXT,
+    bank_name TEXT,
+    bank_account_holder_name TEXT,
+    bank_account_number TEXT,
+    payment_date TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(50) DEFAULT 'pending'
+);
+
+
 
 
 
@@ -275,7 +303,7 @@ CREATE TABLE carts (
   cart_id VARCHAR(255) PRIMARY KEY,
   user_email VARCHAR(255) NOT NULL,
   sellerId VARCHAR(255) NOT NULL,
-  product_info JSONB,
+  productinfo JSONB,
   deliveries JSONB
 );
 
@@ -288,9 +316,16 @@ CREATE TABLE wishlist (
   wishlist_id VARCHAR(255) PRIMARY KEY,
   product_id VARCHAR(255) NOT NULL,
   product_name TEXT NOT NULL,
-  price INT NOT NULL,
+  sale_price INT NOT NULL,
+  regular_price INT NOT NULL,
+  variants JSONB,
+  weight INT DEFAULT 1,
+  brand VARCHAR(20),
+  qty INT,
+  product_category TEXT,
   img TEXT
 );
+
 
 -- Promotions Table
 CREATE TABLE promotions (
@@ -399,8 +434,8 @@ SET payment_methods = '[]'::jsonb;
 
 -- UPDATE multiple products by category from products table EXAMPLE
 UPDATE products
-SET isBestSeller = TRUE
-WHERE category = 'Electronics';
+SET questions = 
+
 
 UPDATE return_requests 
 SET status = 'pending'
@@ -410,6 +445,7 @@ UPDATE sellers
 SET role = NULL,
     status = 'pending'
 WHERE email = 'tahsinul975@gmail.com';
+
 
 -- RENAME a column in products table EXAMPLE
 ALTER TABLE products

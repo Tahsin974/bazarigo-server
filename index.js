@@ -95,7 +95,7 @@ passport.use(
     {
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: "http://localhost:3000/auth/google/callback",
+      callbackURL: `${process.env.URL}/auth/google/callback`,
     },
     async (accessToken, refreshToken, profile, cb) => {
       try {
@@ -238,7 +238,7 @@ const port = 3000;
 
 app.use(
   cors({
-    origin: `http://localhost:5173`,
+    origin: [`https://bazarigo.com`],
     credentials: true,
   })
 );
@@ -3188,15 +3188,32 @@ ORDER BY stock ASC;
           process.env.JWT_SECRET_KEY,
           { expiresIn: "7d" }
         );
+
         res
-          .clearCookie("Token", { maxAge: 0 })
-          .clearCookie("RefreshToken", { maxAge: 0 });
+          .clearCookie("Token", {
+            httpOnly: true,
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
+            path: "/",
+            maxAge: 0,
+          })
+          .clearCookie("RefreshToken", {
+            httpOnly: true,
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
+            path: "/",
+            maxAge: 0,
+          });
 
         res.cookie("Token", newAccessToken, {
           httpOnly: true,
-          secure: false,
-          sameSite: "Strict",
+          secure: true,
+          sameSite: "None",
+          domain: ".bazarigo.com",
         });
+
         res.json({ message: "Access token refreshed" });
       } catch (err) {
         console.log(err);
@@ -3238,13 +3255,15 @@ ORDER BY stock ASC;
         res
           .cookie("Token", accessToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
           })
           .cookie("RefreshToken", refreshToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
           })
           .redirect(`${process.env.BASEURL}${redirectPath}`); // Redirect to dashboard
       }
@@ -3738,13 +3757,15 @@ ORDER BY stock ASC;
         res
           .cookie("Token", accessToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
           })
           .cookie("RefreshToken", refreshToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
           })
           .status(200)
           .json({
@@ -3828,9 +3849,27 @@ ORDER BY stock ASC;
 
     app.post("/logout", (req, res) => {
       res
-        .clearCookie("Token", { maxAge: 0 })
-        .clearCookie("RefreshToken", { maxAge: 0 })
-        .send({ message: "logout success", logOut: true });
+        .clearCookie("Token", {
+          httpOnly: true,
+          secure: true,
+          sameSite: "None",
+          domain: ".bazarigo.com",
+          path: "/",
+          maxAge: 0,
+        })
+        .clearCookie("RefreshToken", {
+          httpOnly: true,
+          secure: true,
+          sameSite: "None",
+          domain: ".bazarigo.com",
+          path: "/",
+          maxAge: 0,
+        })
+        .status(200)
+        .json({
+          message: "logout success",
+          logOut: true,
+        });
     });
 
     // PUT: User Settings API Route
@@ -4815,59 +4854,6 @@ ORDER BY
     // ------------ Delivery API Routes ----------------//
     // GET: Get Deliveries API Route
 
-    //     app.get("/deliveries", async (req, res) => {
-    //       const {
-    //         sellerId,
-    //         userId,
-    //         weight: weightStr,
-    //         orderAmount: orderAmountStr,
-    //         isCod,
-    //       } = req.query;
-    //       const weight = parseInt(weightStr, 10) || 0;
-    //       const orderAmount = parseInt(orderAmountStr, 10) || 0;
-    //       const isCodBool = isCod === "true";
-
-    //       // 🧩 Validation (deliveryType removed)
-    //       console.log("Received params:", req.query);
-    //       if (!sellerId || !userId || !weight || !orderAmount) {
-    //         return res.status(400).json({
-    //           error: "sellerId, userId, weight, and orderAmount are required",
-    //         });
-    //       }
-
-    //       try {
-    //         const query = `
-    // WITH seller_postal AS ( SELECT district AS s_district, AVG(latitude) AS s_lat, AVG(longitude) AS s_lon FROM postal_zones WHERE postal_code = ( SELECT postal_code FROM sellers WHERE id = $1 ) GROUP BY district ), customer_postal AS ( SELECT district AS c_district, AVG(latitude) AS c_lat, AVG(longitude) AS c_lon, MAX(is_remote::int) AS is_remote FROM postal_zones WHERE postal_code = ( SELECT postal_code FROM users WHERE id = $2 ) GROUP BY district ), distance_calc AS ( SELECT *, 6371 * 2 * ASIN(SQRT( POWER(SIN(RADIANS((c_lat - s_lat)/2)),2) + COS(RADIANS(s_lat)) * COS(RADIANS(c_lat)) * POWER(SIN(RADIANS((c_lon - s_lon)/2)),2) )) AS distance_km FROM seller_postal sp CROSS JOIN customer_postal cp ), zone_calc AS ( SELECT CASE WHEN is_remote = 1 THEN 'Remote Area' WHEN distance_km <= 20 THEN 'Inside Area' WHEN distance_km <= 50 THEN 'Near Area' ELSE 'Outside Area' END AS zone_name, distance_km FROM distance_calc ) SELECT zc.zone_name, z.delivery_time, CAST( CASE WHEN ($4 * 1.01) >= COALESCE(z.free_delivery_min_amount, 999999) THEN 0 ELSE GREATEST( CASE WHEN zc.zone_name = 'Inside Area' THEN 70 WHEN zc.zone_name = 'Near Area' THEN 100 WHEN zc.zone_name = 'Outside Area' THEN 120 WHEN zc.zone_name = 'Remote Area' THEN 200 ELSE 0 END, ( z.delivery_charge + (GREATEST(COALESCE(NULLIF($3, '')::numeric, 1), 0) * 10) + CASE WHEN $5 = 'true' THEN GREATEST(10, $4 * 0.01) ELSE 0 END ) ) END AS INTEGER) AS total_delivery_charge FROM zone_calc zc LEFT JOIN zones z ON z.name = zc.zone_name;
-    // `;
-
-    //         const result = await pool.query(query, [
-    //           sellerId, // $1
-    //           userId, // $2
-    //           weight, // $3
-    //           orderAmount, // $4
-    //           isCodBool, // $5
-    //         ]);
-
-    //         if (result.rows.length === 0) {
-    //           return res.status(200).json({
-    //             result: [
-    //               {
-    //                 zone_name: "Inside Area",
-    //                 delivery_time: "1-2 days",
-    //                 total_delivery_charge: 70,
-    //               },
-    //             ],
-    //           });
-    //         }
-
-    //         return res.status(200).json({
-    //           result: result.rows,
-    //         });
-    //       } catch (err) {
-    //         return res.status(500).json({ error: err.message });
-    //       }
-    //     });
-
     app.get(
       "/deliveries",
       passport.authenticate("jwt", { session: false }),
@@ -5762,7 +5748,7 @@ WHERE customer_email = $1;
       verifyAdmin,
       async (req, res) => {
         try {
-          const query = "SELECT * FROM return_requests;";
+          const query = "SELECT * FROM return_requests WHERE status='pending';";
 
           const result = await pool.query(query);
           res.status(200).json({
@@ -7631,6 +7617,8 @@ app.get("/", (req, res) => {
   res.send("Welcome to Bazarigo Server!");
 });
 
-app.listen(port, () => {
+app.listen(port, async () => {
+  const admin = await bcrypt.hash("BzG@84rG!29Lk53#ioN7", 12);
+  console.log(admin);
   console.log(`Example app listening at http://localhost:${port}`);
 });

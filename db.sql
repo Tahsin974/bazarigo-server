@@ -1,5 +1,3 @@
-CREATE DATABASE bazarigo_db;
--- Tables for Bazarigo E-commerce Platform
 
 
 -- Products Table
@@ -40,7 +38,7 @@ CREATE TABLE products (
     seller_id VARCHAR(100),
     seller_name VARCHAR(150),
     seller_store_name VARCHAR(150),
-    seller_role VARCHAR(50) ,
+    seller_role VARCHAR(50) 
 );
 
 
@@ -90,7 +88,7 @@ CREATE TABLE sellers (
     status VARCHAR(50) DEFAULT 'pending',
     last_login TIMESTAMP DEFAULT NULL,
     role VARCHAR(50) DEFAULT NULL,
-    reviews JSONB[] DEFAULT '{}',
+    reviews JSONB[] DEFAULT '{}'
 
 );
 
@@ -368,85 +366,3 @@ CREATE TABLE messages (
 
 
 
-
-
--- POST PRODUCT on products table  EXAMPLE
-INSERT INTO products (id, name,price,description)
-VALUES ('prod-001', 'Sample Product', 100, 'This is a sample product description.');
-
--- READ all products from products table
-SELECT * FROM products;
-
--- READ single product by id from products table
-SELECT * FROM products WHERE id = 'prod-001';
-
--- READ products specific fields from products table
-SELECT id, name, price FROM products;
-
--- READ products with category filter from products table
-SELECT * FROM products WHERE category = 'Electronics';
-
--- DELETE single product by id from products table
-DELETE FROM products WHERE id = 'prod-001';
-
--- DELETE all products from products table
-DELETE FROM products;
--- DELETE all ids postal_zones from postal_zones (if serial)
-DELETE FROM postal_zones WHERE id = ANY($1::int[])
--- DELETE all ids postal_zones from postal_zones (if uuid)
-DELETE FROM postal_zones WHERE id = ANY($1::uuid[])
--- DELETE all ids postal_zones from postal_zones (if varchar)
-DELETE FROM postal_zones WHERE id = ANY($1::varchar[])
-
-DELETE FROM sellers WHERE email = tahsinul975@gmail.com;
-
--- UPDATE single product by id from products table EXAMPLE
-UPDATE products
-SET price = 120, description = 'Updated product description.'
-WHERE id = 'prod-001';
-
--- ADD a new column to products table EXAMPLE
-ALTER TABLE products
-ADD COLUMN stock INT DEFAULT 0;
-
-
-ALTER TABLE admins
-ADD COLUMN reviews JSONB[] DEFAULT '{}';
-
-
-
--- REMOVE a column from products table EXAMPLE
-ALTER TABLE products
-DROP COLUMN stock;
-
-
--- UPDATE multiple products by ids from products table EXAMPLE
-UPDATE products
-SET discount = 15
-WHERE id = ANY($1::varchar[]);
-
--- UPDATE column value of all products from products table EXAMPLE
-UPDATE products
-SET isNew = FALSE;
-UPDATE users
-SET payment_methods = '[]'::jsonb;
-
-
--- UPDATE multiple products by category from products table EXAMPLE
-UPDATE products
-SET questions = 
-
-
-UPDATE return_requests 
-SET status = 'pending'
-WHERE order_id = 'OR998C8A4685BB';
-
-UPDATE sellers
-SET role = NULL,
-    status = 'pending'
-WHERE email = 'tahsinul975@gmail.com';
-
-
--- RENAME a column in products table EXAMPLE
-ALTER TABLE products
-RENAME COLUMN product_name TO name;

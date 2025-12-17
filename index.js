@@ -645,7 +645,6 @@ ORDER BY store_name, id ASC;
           message: "Banner Added Successfully!",
         });
       } catch (error) {
-        console.log(error);
         res.status(500).json({ message: error.message });
       }
     });
@@ -663,7 +662,6 @@ ORDER BY store_name, id ASC;
             banners: result.rows,
           });
         } catch (error) {
-          console.log(error);
           res.status(500).json({ message: error.message });
         }
       }
@@ -884,101 +882,106 @@ ORDER BY store_name, id ASC;
             createdCount: result.rowCount,
           });
         } catch (error) {
-          console.log(error);
           res.status(500).json({ message: error.message });
         }
       }
     );
     //POST: Bulk Product Upload API Route
-    app.post("/products/bulk", upload.array("images"), async (req, res) => {
-      try {
-        const products = req.body;
+    app.post(
+      "/products/bulk",
+      passport.authenticate("jwt", { session: false }),
+      upload.array("images"),
+      async (req, res) => {
+        try {
+          const products = req.body;
 
-        if (!Array.isArray(products) || products.length === 0) {
-          return res.status(400).json({ message: "No products provided" });
-        }
+          if (!Array.isArray(products) || products.length === 0) {
+            return res.status(400).json({ message: "No products provided" });
+          }
 
-        const insertedProducts = [];
+          const insertedProducts = [];
 
-        for (const item of products) {
-          item.id = uuidv4();
+          for (const item of products) {
+            item.id = uuidv4();
 
-          let sellerId, sellerName, sellerStoreName, sellerRole;
-          const user = req.user;
+            let sellerId, sellerName, sellerStoreName, sellerRole;
+            const user = req.user;
 
-          if (user.role === "seller") {
-            // Logged-in seller এর নিজের তথ্য ব্যবহার
-            sellerId = user.id;
-            sellerName = user.full_name;
-            sellerStoreName = user.store_name;
-            sellerRole = user.role;
-          } else {
-            // Admin এর ক্ষেত্রে `bazarigo` স্টোর ব্যবহার
-            const bazarigo = await pool.query(
-              "SELECT id, full_name, store_name,role FROM admins WHERE email='bazarigo.official@gmail.com' LIMIT 1;"
-            );
-            if (bazarigo.rows.length > 0) {
-              sellerId = bazarigo.rows[0].id;
-              sellerName = bazarigo.rows[0].full_name;
-              sellerStoreName = bazarigo.rows[0].store_name;
-              sellerRole = bazarigo.rows[0].role;
+            if (user.role === "seller") {
+              // Logged-in seller এর নিজের তথ্য ব্যবহার
+              sellerId = user.id;
+              sellerName = user.full_name;
+              sellerStoreName = user.store_name;
+              sellerRole = user.role;
+            } else {
+              // Admin এর ক্ষেত্রে `bazarigo` স্টোর ব্যবহার
+              const bazarigo = await pool.query(
+                "SELECT id, full_name, store_name,role FROM admins WHERE email='bazarigo.official@gmail.com' LIMIT 1;"
+              );
+              if (bazarigo.rows.length > 0) {
+                sellerId = bazarigo.rows[0].id;
+                sellerName = bazarigo.rows[0].full_name;
+                sellerStoreName = bazarigo.rows[0].store_name;
+                sellerRole = bazarigo.rows[0].role;
+              }
             }
-          }
-          // --- sanitize description ---
-          const sanitizedDescription = sanitizeHtml(item.description || "", {
-            allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
-            allowedAttributes: {
-              ...sanitizeHtml.defaults.allowedAttributes,
-              img: ["src", "alt", "width", "height"],
-            },
-          });
+            // --- sanitize description ---
+            const sanitizedDescription = sanitizeHtml(item.description || "", {
+              allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
+              allowedAttributes: {
+                ...sanitizeHtml.defaults.allowedAttributes,
+                img: ["src", "alt", "width", "height"],
+              },
+            });
 
-          const uploadDirs = {
-            image: path.join(__dirname, "uploads", "products", "images"),
-            video: path.join(__dirname, "uploads", "products", "videos"),
-          };
+            const uploadDirs = {
+              image: path.join(__dirname, "uploads", "products", "images"),
+              video: path.join(__dirname, "uploads", "products", "videos"),
+            };
 
-          // Create directories if not exist
-          for (const dir of Object.values(uploadDirs)) {
-            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          }
+            // Create directories if not exist
+            for (const dir of Object.values(uploadDirs)) {
+              if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            }
 
-          // --- process images ---
-          const savedPaths = (
-            await Promise.all(
-              (item.images || []).map(async (imgStr) => {
-                if (!imgStr) return null;
+            // --- process images ---
+            const savedPaths = (
+              await Promise.all(
+                (item.images || []).map(async (imgStr) => {
+                  if (!imgStr) return null;
 
-                if (imgStr.startsWith("data:image/")) {
-                  const base64Data = imgStr.replace(
-                    /^data:image\/\w+;base64,/,
-                    ""
-                  );
-                  const buffer = Buffer.from(base64Data, "base64");
+                  if (imgStr.startsWith("data:image/")) {
+                    const base64Data = imgStr.replace(
+                      /^data:image\/\w+;base64,/,
+                      ""
+                    );
+                    const buffer = Buffer.from(base64Data, "base64");
 
-                  const safeName = (item.productName || "product").replace(
-                    /\s+/g,
-                    "_"
-                  );
-                  const filename = `${safeName}-${uuidv4()}.webp`;
-                  const uploadDir = path.join(__dirname, "uploads");
+                    const safeName = (item.productName || "product").replace(
+                      /\s+/g,
+                      "_"
+                    );
+                    const filename = `${safeName}-${uuidv4()}.webp`;
+                    const uploadDir = path.join(__dirname, "uploads");
 
-                  if (!fs.existsSync(uploadDir))
-                    fs.mkdirSync(uploadDir, { recursive: true });
+                    if (!fs.existsSync(uploadDir))
+                      fs.mkdirSync(uploadDir, { recursive: true });
 
-                  const filepath = path.join(uploadDir, filename);
-                  await sharp(buffer).webp({ lossless: true }).toFile(filepath);
+                    const filepath = path.join(uploadDir, filename);
+                    await sharp(buffer)
+                      .webp({ lossless: true })
+                      .toFile(filepath);
 
-                  return `/uploads/${filename}`;
-                } else {
-                  return imgStr.trim();
-                }
-              })
-            )
-          ).filter(Boolean);
+                    return `/uploads/${filename}`;
+                  } else {
+                    return imgStr.trim();
+                  }
+                })
+              )
+            ).filter(Boolean);
 
-          // --- database insert ---
-          const query = `
+            // --- database insert ---
+            const query = `
         INSERT INTO products (
           id, product_name, regular_price, sale_price, discount, rating,
           isBestSeller, isHot, isNew, isTrending, isLimitedStock, isExclusive, isFlashSale,
@@ -991,51 +994,51 @@ ORDER BY store_name, id ASC;
         ) RETURNING *;
       `;
 
-          const values = [
-            item.id,
-            item.productName || "Untitled",
-            item.regular_price || 0,
-            item.sale_price || 0,
-            item.discount || 0,
-            parseFloat(item.rating) || 0,
-            item.isBestSeller || false,
-            item.isHot || false,
-            item.isNew || true,
-            item.isTrending || false,
-            item.isLimitedStock || false,
-            item.isExclusive || false,
-            item.isFlashSale || false,
-            item.category || null,
-            item.subcategory || null,
-            sanitizedDescription,
-            item.stock || 0,
-            item.brand || null,
-            parseFloat(item.weight) || 1,
-            savedPaths, // pg converts JS array to TEXT[]
-            item.extras || {}, // pg converts JS object to JSONB
+            const values = [
+              item.id,
+              item.productName || "Untitled",
+              item.regular_price || 0,
+              item.sale_price || 0,
+              item.discount || 0,
+              parseFloat(item.rating) || 0,
+              item.isBestSeller || false,
+              item.isHot || false,
+              item.isNew || true,
+              item.isTrending || false,
+              item.isLimitedStock || false,
+              item.isExclusive || false,
+              item.isFlashSale || false,
+              item.category || null,
+              item.subcategory || null,
+              sanitizedDescription,
+              item.stock || 0,
+              item.brand || null,
+              parseFloat(item.weight) || 1,
+              savedPaths, // pg converts JS array to TEXT[]
+              item.extras || {}, // pg converts JS object to JSONB
 
-            null,
-            sellerId || null,
-            sellerName || null,
-            sellerStoreName || "",
-            [],
-            sellerRole,
-          ];
+              null,
+              sellerId || null,
+              sellerName || null,
+              sellerStoreName || "",
+              [],
+              sellerRole,
+            ];
 
-          const result = await pool.query(query, values);
-          insertedProducts.push(result.rows[0]);
+            const result = await pool.query(query, values);
+            insertedProducts.push(result.rows[0]);
+          }
+
+          res.status(201).json({
+            message: "Bulk products uploaded successfully",
+            insertedCount: insertedProducts.length,
+            insertedProducts,
+          });
+        } catch (error) {
+          res.status(500).json({ message: error.message });
         }
-
-        res.status(201).json({
-          message: "Bulk products uploaded successfully",
-          insertedCount: insertedProducts.length,
-          insertedProducts,
-        });
-      } catch (error) {
-        console.log(error);
-        res.status(500).json({ message: error.message });
       }
-    });
+    );
 
     // PUT : Update Product By ID
     app.put(
@@ -1120,7 +1123,6 @@ ORDER BY store_name, id ASC;
               img: ["src", "alt", "width", "height"],
             },
           });
-          console.log(savedPaths);
 
           const query = `
             UPDATE products SET
@@ -1302,7 +1304,6 @@ ORDER BY store_name, id ASC;
             updatedQuestions: result.rows[0].questions,
           });
         } catch (error) {
-          console.log(error);
           res.status(500).json({ success: false, error: error.message });
         }
       }
@@ -1487,7 +1488,6 @@ ORDER BY store_name, id ASC;
     `;
 
         await pool.query(updateQuery);
-        console.log("⏳ isNew updated based on createdat");
       } catch (error) {
         console.error("Cron error:", error.message);
       }
@@ -1537,15 +1537,12 @@ ORDER BY store_name, id ASC;
           products: result.rows,
         });
       } catch (error) {
-        console.log(error);
         res.status(500).json({ message: error.message });
       }
     });
 
     cron.schedule("0 0 * * *", async () => {
       try {
-        console.log("Updating trending products...");
-
         // Update trending products
         const query = `
       -- Set trending = true for products sold in last 7 days AND rating criteria
@@ -1591,8 +1588,6 @@ ORDER BY store_name, id ASC;
     `;
 
         await pool.query(query);
-
-        console.log("Trending products updated successfully!");
       } catch (error) {
         console.error("Error updating trending products:", error);
       }
@@ -1843,11 +1838,6 @@ ORDER BY store_name, id ASC;
           `DELETE FROM flashSaleProducts WHERE id = ANY($1::int[])`,
           [idsToDelete]
         );
-
-        console.log(
-          `[FlashSale] Expired flash sales deleted and product stocks restored:`,
-          idsToDelete
-        );
       } catch (err) {
         console.error("[FlashSale] Cron auto-delete error:", err);
       }
@@ -2036,10 +2026,9 @@ ORDER BY store_name, id ASC;
           "SELECT is_auto_enabled FROM flash_sale_settings WHERE id=1;"
         );
         if (!settingsRes.rows[0].is_auto_enabled) {
-          console.log("⚡ Auto flash sale is turned off. Skipping...");
           return;
         }
-        console.log("⏰ Cron test running every hour...");
+
         const now = Math.floor(Date.now() / 1000);
 
         // Check for active flash sale
@@ -2049,7 +2038,6 @@ ORDER BY store_name, id ASC;
         );
 
         if (activeRes.rows.length > 0) {
-          console.log("⚡ Active flash sale already running, skipping...");
           return;
         }
 
@@ -2063,7 +2051,6 @@ ORDER BY store_name, id ASC;
         );
 
         if (!candidates.length) {
-          console.log("❌ No suitable products found for flash sale.");
           return;
         }
 
@@ -2215,47 +2202,6 @@ ORDER BY store_name, id ASC;
             await pool.query(query, values);
           })
         );
-        // Update product stock & status
-        // for (const p of productPayload) {
-        //   try {
-        //     const query = `
-        //   UPDATE products SET  product_name=$1, regular_price=$2, sale_price=$3, discount=$4, rating=$5,
-        //         isBestSeller=$6, isHot=$7, isNew=$8, isTrending=$9, isLimitedStock=$10, isExclusive=$11, isFlashSale=$12,
-        //         category=$13, subcategory=$14, description=$15, stock=$16, brand=$17, images=$18, extras=$19,
-        //          updatedAt=$20 WHERE id = $21;
-        // `;
-        //     const values = [
-        //       p.product_name,
-        //       p.regular_price,
-        //       p.sale_price,
-        //       p.discount,
-        //       p.rating,
-        //       p.isbestseller,
-        //       p.ishot,
-        //       p.isnew,
-        //       p.istrending,
-        //       p.islimitedstock,
-        //       p.isexclusive,
-        //       p.isflashSale,
-        //       p.category,
-        //       p.subcategory,
-        //       p.description,
-        //       p.stock,
-        //       p.brand,
-        //       p.images,
-        //       p.extras,
-        //       p.updatedAt,
-        //       p.id,
-        //     ];
-        //     await pool.query(query, values);
-        //   } catch (error) {
-        //     console.error(`Product ${p.id} update failed:`, error);
-        //   }
-        // }
-
-        console.log(
-          "✅ Auto flash sale (variant logic) generated successfully!"
-        );
       } catch (err) {
         console.error("❌ Flash sale generation failed:", err.message);
       }
@@ -2291,14 +2237,13 @@ ORDER BY stock ASC;
             const query =
               "SELECT id,product_name,category,subcategory,stock,extras FROM products WHERE seller_role='super admin';";
             const result = await pool.query(query);
-            console.log(result.rows);
+
             return res.status(200).json({
               message: "Return Inventory Successfully Done",
               inventory: result.rows,
             });
           }
         } catch (error) {
-          console.log(error);
           res.status(500).json({
             message: error.message,
           });
@@ -2473,7 +2418,6 @@ ORDER BY stock ASC;
             updatedCount: updateResult.rowCount,
           });
         } catch (error) {
-          console.log(error);
           res.status(500).json({ message: error.message });
         }
       }
@@ -2689,6 +2633,131 @@ ORDER BY stock ASC;
     // ------------ Seller API Routes ------------//
     // POST: Create Seller API Route
     app.post(
+      "/create-sellers",
+      upload.fields([
+        { name: "profileImg", maxCount: 1 },
+        { name: "nidFrontImg", maxCount: 1 },
+        { name: "nidBackImg", maxCount: 1 },
+      ]),
+      async (req, res) => {
+        try {
+          const sellerInfo = req.body;
+          const files = req.files;
+
+          const email = sellerInfo.email;
+          if (!email)
+            return res.status(400).json({ message: "Email is required" });
+
+          // Check duplicate email
+          const checkQuery = `
+        SELECT 'admins' AS type FROM admins WHERE email = $1
+        UNION
+        SELECT 'users' AS type FROM users WHERE email = $1
+        UNION
+        SELECT 'sellers' AS type FROM sellers WHERE email = $1
+      `;
+          const checkResult = await pool.query(checkQuery, [email]);
+          if (checkResult.rowCount > 0)
+            return res.status(400).json({ message: "Email already exists" });
+
+          // Email & Password validation
+          if (!emailRegex.test(email))
+            return res.status(400).json({ message: "Invalid email format" });
+
+          if (!passwordRegex.test(sellerInfo.password))
+            return res.status(400).json({
+              message: "Password must be min 8 chars with letters & numbers",
+            });
+
+          // Hash password
+          const hashedPassword = await bcrypt.hash(sellerInfo.password, 12);
+
+          // Process uploaded files
+          const uploadDir = path.join(__dirname, "uploads", "sellers");
+          if (!fs.existsSync(uploadDir))
+            fs.mkdirSync(uploadDir, { recursive: true });
+
+          const saveMulterImage = async (file, prefix) => {
+            if (!file) return null;
+            const safeName =
+              sellerInfo.full_Name?.replace(/\s+/g, "_") || "seller";
+            const filename = `${safeName}_${prefix}_${uuidv4()}.webp`;
+            const filepath = path.join(uploadDir, filename);
+            await sharp(file.buffer).webp({ lossless: true }).toFile(filepath);
+            return `/uploads/sellers/${filename}`;
+          };
+
+          const profileImgPath = await saveMulterImage(
+            files?.profileImg?.[0],
+            "profile"
+          );
+          const nidFrontPath = await saveMulterImage(
+            files?.nidFrontImg?.[0],
+            "nid_front"
+          );
+          const nidBackPath = await saveMulterImage(
+            files?.nidBackImg?.[0],
+            "nid_back"
+          );
+
+          // Prepare temp_data for OTP verification
+          const sellerId = generateId("SEL");
+          const userName = await generateUsername(sellerInfo.email, pool);
+
+          const query = `INSERT INTO sellers (
+      id, email, user_name, password, full_name, phone_number, img,
+      nid_number, store_name, product_category, business_address, district, thana,
+      postal_code, trade_license_number, nid_front_file, nid_back_file, bank_name,
+      branch_name, account_number, account_holder_name, routing_number, mobile_bank_name,
+      mobile_bank_account_number, created_at, status,role, date_of_birth, gender
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
+      $14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,NOW(),$25,$26,$27,$28
+    ) RETURNING *;`;
+
+          const values = [
+            sellerId,
+            email,
+            userName,
+            hashedPassword,
+            sellerInfo.full_Name,
+            sellerInfo.phone_number || null,
+            profileImgPath || null,
+            sellerInfo.nidNumber || null,
+            sellerInfo.storeName || null,
+            sellerInfo.product_category || null,
+            sellerInfo.businessAddress || null,
+            sellerInfo.district || null,
+            sellerInfo.thana || null,
+            sellerInfo.postal_code || null,
+            sellerInfo.tradeLicenseNumber || null,
+            nidFrontPath || null,
+            nidBackPath || null,
+            sellerInfo.bankName || null,
+            sellerInfo.branchName || null,
+            sellerInfo.accountNumber || null,
+            sellerInfo.accountHolderName || null,
+            sellerInfo.routingNumber || null,
+            sellerInfo.mobile_bank_name || null,
+            sellerInfo.mobileBankAccountNumber || null,
+            "approved",
+            "seller",
+            sellerInfo.date_of_birth || null,
+            sellerInfo.gender || null,
+          ];
+
+          const insertedSeller = await pool.query(query, values);
+          res.status(201).json({
+            message: "Seller created successfully",
+
+            createdCount: insertedSeller.rowCount,
+          });
+        } catch (error) {
+          res.status(500).json({ message: "Internal server error" });
+        }
+      }
+    );
+    app.post(
       "/sellers",
       upload.fields([
         { name: "profileImg", maxCount: 1 },
@@ -2761,6 +2830,7 @@ ORDER BY stock ASC;
           const tempData = {
             id: sellerId,
             email,
+            user_name: await generateUsername(sellerInfo.email, pool),
             password: hashedPassword,
             full_Name: sellerInfo.full_Name,
             phone_number: sellerInfo.phone_number || null,
@@ -2769,6 +2839,7 @@ ORDER BY stock ASC;
             nidBack: nidBackPath,
             storeName: sellerInfo.storeName || null,
             product_category: sellerInfo.product_category || null,
+            nidNumber: sellerInfo.nidNumber || null,
             businessAddress: sellerInfo.businessAddress || null,
             district: sellerInfo.district || null,
             thana: sellerInfo.thana || null,
@@ -2823,7 +2894,6 @@ ORDER BY stock ASC;
             otp_required: true,
           });
         } catch (error) {
-          console.log(error);
           res.status(500).json({ message: "Internal server error" });
         }
       }
@@ -2982,7 +3052,6 @@ ORDER BY stock ASC;
             updatedCount: result.rowCount,
           });
         } catch (error) {
-          console.log(error);
           res.status(500).json({ message: "Internal server error" });
         }
       }
@@ -3071,7 +3140,6 @@ ORDER BY stock ASC;
           const approveRes = await pool.query(approveQuery, [status, sellerId]);
 
           if (approveRes.rowCount > 0) {
-            console.log(sellerId);
             // Notification for approval
             await createNotification({
               userId: sellerId,
@@ -3136,7 +3204,6 @@ ORDER BY stock ASC;
             seller: result.rows[0],
           });
         } catch (error) {
-          console.log(error);
           res.status(500).json({ message: error.message });
         }
       }
@@ -3216,7 +3283,6 @@ ORDER BY stock ASC;
 
         res.json({ message: "Access token refreshed" });
       } catch (err) {
-        console.log(err);
         res.sendStatus(403);
       }
     });
@@ -3265,11 +3331,103 @@ ORDER BY stock ASC;
             sameSite: "None",
             domain: ".bazarigo.com",
           })
-          .redirect(`${process.env.BASEURL}${redirectPath}`); // Redirect to dashboard
+          .redirect(`${process.env.BASEURL}${redirectPath}`);
       }
     );
     // POST: Create Users API Route
 
+    app.post("/create-user", upload.single("profileImg"), async (req, res) => {
+      try {
+        const userInfo = req.body;
+        const file = req.file;
+        const id = uuidv4();
+
+        // Email validation
+        if (!emailRegex.test(userInfo.email)) {
+          return res.status(400).json({ message: "Invalid email format" });
+        }
+
+        // Password validation
+        if (!passwordRegex.test(userInfo.password)) {
+          return res.status(400).json({
+            message: "Password must be min 8 chars with letters & numbers",
+          });
+        }
+
+        // Check if user already exists
+        const checkUser = await pool.query(
+          `
+    SELECT email FROM users WHERE email=$1
+    UNION
+    SELECT email FROM sellers WHERE email=$1
+    UNION
+    SELECT email FROM admins WHERE email=$1
+  `,
+          [userInfo.email]
+        );
+
+        if (checkUser.rows.length > 0) {
+          return res.status(400).json({ message: "User Already Exists" });
+        }
+
+        // Handle profile image
+        let profile_imgPath = null;
+        if (file) {
+          const uploadDir = path.join(__dirname, "uploads", "users");
+          if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+          }
+
+          const safeName = (userInfo.name || "user").replace(/\s+/g, "_");
+          const filename = `${safeName}_profile_${uuidv4()}.webp`;
+          const filepath = path.join(uploadDir, filename);
+          await sharp(file.buffer).webp({ lossless: true }).toFile(filepath);
+          profile_imgPath = `/uploads/users/${filename}`;
+        }
+
+        // Hash password
+        const hashedPassword = await bcrypt.hash(userInfo.password, 12);
+
+        // Generate username
+        const userName = await generateUsername(userInfo.email, pool);
+
+        const query = `INSERT INTO users (
+      id, name, user_name, email, img, phone, password,
+      address, district, thana, postal_code, created_at, updated_at,
+      date_of_birth, gender
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), $12, $13
+    ) RETURNING *;`;
+
+        const values = [
+          id,
+          userInfo.name,
+          userName,
+          userInfo.email,
+          profile_imgPath || null,
+          userInfo.phone || null,
+          hashedPassword,
+          userInfo.address || null,
+          userInfo.district || null,
+          userInfo.thana || null,
+          userInfo.postal_code || null,
+          userInfo.date_of_birth || null,
+          userInfo.gender || null,
+        ];
+
+        const insertedUser = await pool.query(query, values);
+
+        res.status(201).json({
+          message: "User created successfully",
+
+          createdCount: insertedUser.rowCount,
+        });
+      } catch (error) {
+        res
+          .status(500)
+          .json({ message: "Internal server error", error: error.message });
+      }
+    });
     app.post("/register", upload.single("profileImg"), async (req, res) => {
       try {
         const userInfo = req.body;
@@ -3379,8 +3537,9 @@ ORDER BY stock ASC;
           .status(200)
           .json({ message: "OTP sent to your email", otp_required: true });
       } catch (error) {
-        console.log(error);
-        res.status(500).json({ message: "Internal server error" });
+        res
+          .status(500)
+          .json({ message: "Internal server error", error: error.message });
       }
     });
 
@@ -3602,16 +3761,16 @@ ORDER BY stock ASC;
       nid_number, store_name, product_category, business_address, district, thana,
       postal_code, trade_license_number, nid_front_file, nid_back_file, bank_name,
       branch_name, account_number, account_holder_name, routing_number, mobile_bank_name,
-      mobile_bank_account_number, created_at, updated_at, status, date_of_birth, gender
+      mobile_bank_account_number, created_at,  status, date_of_birth, gender
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
-      $14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,NOW(),NOW(),$25,$26,$27
+      $14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,NOW(),$25,$26,$27
     ) RETURNING *;`;
 
         const values = [
           tempData.id,
           tempData.email,
-          tempData.user_name || tempData.email.split("@")[0],
+          tempData.user_name,
           tempData.password,
           tempData.full_Name,
           tempData.phone_number || null,
@@ -3657,9 +3816,7 @@ ORDER BY stock ASC;
                 })
               )
             );
-          } catch (notifError) {
-            console.log("Failed to create notifications:", notifError);
-          }
+          } catch (notifError) {}
 
           return res.status(201).json({
             message: "Seller created successfully",
@@ -3774,7 +3931,6 @@ ORDER BY stock ASC;
             role,
           });
       } catch (err) {
-        console.log(err);
         res.status(500).json({ message: err.message });
       }
     });
@@ -3929,7 +4085,6 @@ ORDER BY stock ASC;
             try {
               paymentMethods = JSON.parse(paymentMethods);
             } catch (err) {
-              console.log(err);
               paymentMethods = [];
             }
           }
@@ -3998,7 +4153,6 @@ ORDER BY stock ASC;
             });
           }
         } catch (error) {
-          console.log(error);
           if (error.code === "23505" && error.detail.includes("email")) {
             return res.status(400).json({ message: "Email already exists" });
           }
@@ -4224,7 +4378,6 @@ ORDER BY stock ASC;
     app.post("/following", async (req, res) => {
       try {
         const { userId, sellerId, sellerRole } = req.body;
-        console.log({ userId, sellerId, sellerRole });
 
         if (!userId || !sellerId) {
           return res.status(400).json({
@@ -4266,7 +4419,6 @@ ORDER BY stock ASC;
         const insertResult = await pool.query(insertQuery, [userId, sellerId]);
 
         if (insertResult.rowCount > 0) {
-          console.log("notification jacce");
           await createNotification({
             userId: sellerId,
             userRole: sellerRole,
@@ -5285,7 +5437,6 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
             });
           }
         } catch (error) {
-          console.log(error);
           res.status(500).json({ message: error.message });
         }
       }
@@ -5336,7 +5487,6 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
             orders: result.rows,
           });
         } catch (error) {
-          console.log(error);
           res.status(500).json({ message: error.message });
         }
       }
@@ -5366,7 +5516,6 @@ WHERE customer_email = $1;
             orders: result.rows,
           });
         } catch (error) {
-          console.log(error);
           res.status(500).json({ message: error.message });
         }
       }
@@ -5395,7 +5544,6 @@ WHERE customer_email = $1;
             orders: result.rows[0].order_count,
           });
         } catch (error) {
-          console.log(error);
           res.status(500).json({ message: error.message });
         }
       }
@@ -5586,7 +5734,7 @@ WHERE customer_email = $1;
 
         if (updatedResult.rowCount > 0) {
           const sellerId = updatedOrderItems[0].sellerid;
-          console.log(customerId);
+
           /* 🔔 Notify customer about status change */
           await createNotification({
             userId: customerId,
@@ -5616,7 +5764,6 @@ WHERE customer_email = $1;
           });
         }
       } catch (error) {
-        console.log(error);
         res.status(500).json({ message: error.message });
       }
     });
@@ -5662,7 +5809,6 @@ WHERE customer_email = $1;
         const values = [status, id];
         const result = await pool.query(query, values);
         if (result.rowCount > 0) {
-          console.log(result.rows[0]);
           const getUserFromOrder = await pool.query(
             `
   SELECT u.id, u.role
@@ -5736,7 +5882,6 @@ WHERE customer_email = $1;
             returnOrders: result.rows,
           });
         } catch (error) {
-          console.log(error);
           res.status(500).json({ message: error.message });
         }
       }
@@ -6209,7 +6354,6 @@ WHERE customer_email = $1;
         );
         if (result.rowCount > 0) {
           if (sender_role === "customer") {
-            console.log("message dey nai age", checkResult.rows.length);
             if (checkResult.rows.length === 0) {
               const autoId = uuidv4();
               const autoContent =
@@ -6242,7 +6386,6 @@ WHERE customer_email = $1;
 
         res.status(200).json({ success: true, message: result.rows[0] });
       } catch (err) {
-        console.log(err);
         res.status(500).json({ success: false, error: err.message });
       }
     });
@@ -6297,7 +6440,6 @@ WHERE customer_email = $1;
       async (req, res) => {
         try {
           const loggedInUserId = req.params.id;
-          console.log(loggedInUserId);
           if (loggedInUserId !== req.user.id) {
             return res.status(401).send("unauthorized access");
           }
@@ -6352,7 +6494,6 @@ ORDER BY lm.created_at DESC;
 
           res.status(200).json({ success: true, messages: result.rows });
         } catch (err) {
-          console.log(err);
           res.status(500).json({ success: false, error: err.message });
         }
       }
@@ -6661,8 +6802,9 @@ ORDER BY lm.created_at DESC;
             updatedCount: result.rowCount,
           });
         } catch (error) {
-          console.log(error);
-          return res.status(500).json({ message: "Internal server error" });
+          return res
+            .status(500)
+            .json({ message: "Internal server error", err: error.message });
         }
       }
     );
@@ -7470,7 +7612,6 @@ ORDER BY d.date ASC;
             notifications: result.rows,
           });
         } catch (err) {
-          console.log(err);
           res.status(500).json({ message: err.message });
         }
       }
@@ -7492,7 +7633,6 @@ ORDER BY d.date ASC;
             await pool.query(`DELETE FROM notifications WHERE id = $1`, [
               row.id,
             ]);
-            console.log(`Notification ${row.id} deleted`);
           }
         }
       } catch (err) {
@@ -7531,7 +7671,6 @@ ORDER BY d.date ASC;
             notification: result.rows[0],
           });
         } catch (err) {
-          console.log(err);
           res.status(500).json({ message: err.message });
         }
       }
@@ -7614,11 +7753,9 @@ ORDER BY d.date ASC;
 }
 run().catch(console.dir);
 app.get("/", (req, res) => {
-  res.send("Welcome to Bazarigo Server!");
+  res.send(`Welcome to Bazarigo Server! ${process.env.DATABASE_PORT}`);
 });
 
 app.listen(port, async () => {
-  const admin = await bcrypt.hash("BzG@84rG!29Lk53#ioN7", 12);
-  console.log(admin);
   console.log(`Example app listening at http://localhost:${port}`);
 });

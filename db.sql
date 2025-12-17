@@ -127,6 +127,8 @@ CREATE TABLE admins (
     password VARCHAR(255) NOT NULL,
     phone_number VARCHAR(50),
     profile_img TEXT,
+    store_img TEXT,
+
     address TEXT DEFAULT NULL,
     district VARCHAR(100) NULL,
     thana VARCHAR(100) NULL,
@@ -140,6 +142,7 @@ CREATE TABLE admins (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT NULL,
     store_name VARCHAR(255) DEFAULT NULL,
+    
     product_category VARCHAR(255) DEFAULT NULL,
     business_address TEXT DEFAULT NULL
 );
@@ -234,7 +237,8 @@ CREATE TABLE email_otps (
  email VARCHAR(255) NOT NULL,
  otp VARCHAR(10) NOT NULL,
  expires_at TIMESTAMP NOT NULL,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ temp_data JSONB DEFAULT NULL
 );
 
 CREATE TABLE notifications (

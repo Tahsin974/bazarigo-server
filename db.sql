@@ -25,6 +25,7 @@ CREATE TABLE products (
     canDeleteByModerator BOOLEAN DEFAULT FALSE,
     category VARCHAR(100),
     subcategory VARCHAR(100),
+    subcategory_item VARCHAR(100),
     description TEXT,
     stock INT DEFAULT 0,
     brand VARCHAR(100),
@@ -247,12 +248,12 @@ CREATE TABLE notifications (
     user_role VARCHAR(50) NOT NULL,
     title VARCHAR(255) NOT NULL,
     message TEXT NOT NULL,
-    type VARCHAR(50),
-    ref_id VARCHAR(255),
-    ref_data JSONB,
+    type VARCHAR(50) DEFAULT NULL,
+    ref_id VARCHAR(255) NOT NULL,
+    ref_data JSONB DEFAULT NULL,
     is_read BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP 
+    expires_at VARCHAR(15) DEFAULT NULL
 );
 
 

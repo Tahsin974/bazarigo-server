@@ -3925,52 +3925,52 @@ ORDER BY stock ASC;
           { expiresIn: "7d" }
         );
 
-        res
-          .clearCookie("Token", {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            path: "/",
-            maxAge: 0,
-          })
-          .clearCookie("RefreshToken", {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            path: "/",
-            maxAge: 0,
-          });
+        // res
+        //   .clearCookie("Token", {
+        //     httpOnly: true,
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
+        //     path: "/",
+        //     maxAge: 0,
+        //   })
+        //   .clearCookie("RefreshToken", {
+        //     httpOnly: true,
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
+        //     path: "/",
+        //     maxAge: 0,
+        //   });
 
-        res.cookie("Token", newAccessToken, {
-          httpOnly: true,
-          secure: true,
-          sameSite: "None",
-          domain: ".bazarigo.com",
-          maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        });
-
-        // Clear old cookies
-        // res.clearCookie("Token", {
-        //   httpOnly: true,
-        //   sameSite: "Strict",
-        //   maxAge: 0,
-        // });
-
-        // res.clearCookie("RefreshToken", {
-        //   httpOnly: true,
-        //   sameSite: "Strict",
-        //   maxAge: 0,
-        // });
-
-        // // Set new access token
         // res.cookie("Token", newAccessToken, {
         //   httpOnly: true,
-        //   secure: false,
-        //   sameSite: "Strict",
+        //   secure: true,
+        //   sameSite: "None",
+        //   domain: ".bazarigo.com",
         //   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         // });
+
+        // Clear old cookies
+        res.clearCookie("Token", {
+          httpOnly: true,
+          sameSite: "Strict",
+          maxAge: 0,
+        });
+
+        res.clearCookie("RefreshToken", {
+          httpOnly: true,
+          sameSite: "Strict",
+          maxAge: 0,
+        });
+
+        // Set new access token
+        res.cookie("Token", newAccessToken, {
+          httpOnly: true,
+          secure: false,
+          sameSite: "Strict",
+          maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        });
 
         res.json({ message: "Access token refreshed" });
       } catch (err) {
@@ -4009,38 +4009,38 @@ ORDER BY stock ASC;
           }
         );
 
-        res
-          .cookie("Token", accessToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-          })
-          .cookie("RefreshToken", refreshToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-          })
-          .redirect(`${process.env.BASEURL}${redirectPath}`);
-
-        // Set new access token
         // res
         //   .cookie("Token", accessToken, {
         //     httpOnly: true,
-        //     secure: false,
-        //     sameSite: "Strict",
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
         //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         //   })
         //   .cookie("RefreshToken", refreshToken, {
         //     httpOnly: true,
-        //     secure: false,
-        //     sameSite: "Strict",
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
         //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
         //   })
         //   .redirect(`${process.env.BASEURL}${redirectPath}`);
+
+        // Set new access token
+        res
+          .cookie("Token", accessToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "Strict",
+            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+          })
+          .cookie("RefreshToken", refreshToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "Strict",
+            maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+          })
+          .redirect(`${process.env.BASEURL}${redirectPath}`);
       }
     );
     // POST: Create Users API Route
@@ -4640,39 +4640,19 @@ ORDER BY stock ASC;
           }
         );
 
-        res
-          .cookie("Token", accessToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-          })
-          .cookie("RefreshToken", refreshToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-          })
-          .status(200)
-          .json({
-            message: "Login successful",
-            login: true,
-            role,
-          });
-
         // res
         //   .cookie("Token", accessToken, {
         //     httpOnly: true,
-        //     secure: false,
-        //     sameSite: "Strict",
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
         //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         //   })
         //   .cookie("RefreshToken", refreshToken, {
         //     httpOnly: true,
-        //     secure: false,
-        //     sameSite: "Strict",
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
         //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
         //   })
         //   .status(200)
@@ -4681,6 +4661,26 @@ ORDER BY stock ASC;
         //     login: true,
         //     role,
         //   });
+
+        res
+          .cookie("Token", accessToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "Strict",
+            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+          })
+          .cookie("RefreshToken", refreshToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "Strict",
+            maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+          })
+          .status(200)
+          .json({
+            message: "Login successful",
+            login: true,
+            role,
+          });
       } catch (err) {
         res.status(500).json({ message: err.message });
       }
@@ -4755,37 +4755,21 @@ ORDER BY stock ASC;
     );
     // Logout Route
     app.post("/logout", (req, res) => {
-      res
-        .clearCookie("Token", {
-          httpOnly: true,
-          secure: true,
-          sameSite: "None",
-          domain: ".bazarigo.com",
-          path: "/",
-          maxAge: 0,
-        })
-        .clearCookie("RefreshToken", {
-          httpOnly: true,
-          secure: true,
-          sameSite: "None",
-          domain: ".bazarigo.com",
-          path: "/",
-          maxAge: 0,
-        })
-        .status(200)
-        .json({
-          message: "logout success",
-          logOut: true,
-        });
       // res
       //   .clearCookie("Token", {
       //     httpOnly: true,
-      //     sameSite: "Strict",
+      //     secure: true,
+      //     sameSite: "None",
+      //     domain: ".bazarigo.com",
+      //     path: "/",
       //     maxAge: 0,
       //   })
       //   .clearCookie("RefreshToken", {
       //     httpOnly: true,
-      //     sameSite: "Strict",
+      //     secure: true,
+      //     sameSite: "None",
+      //     domain: ".bazarigo.com",
+      //     path: "/",
       //     maxAge: 0,
       //   })
       //   .status(200)
@@ -4793,6 +4777,22 @@ ORDER BY stock ASC;
       //     message: "logout success",
       //     logOut: true,
       //   });
+      res
+        .clearCookie("Token", {
+          httpOnly: true,
+          sameSite: "Strict",
+          maxAge: 0,
+        })
+        .clearCookie("RefreshToken", {
+          httpOnly: true,
+          sameSite: "Strict",
+          maxAge: 0,
+        })
+        .status(200)
+        .json({
+          message: "logout success",
+          logOut: true,
+        });
     });
 
     // Forget Password
@@ -6063,7 +6063,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
         await client.query("BEGIN");
 
         const { payload, promoCode, userId, paymentPayload } = req.body;
-        const orderId = generateId("OR");
+        const orderId = generateId("ODR");
 
         const orderdProducts = payload.orderItems.flatMap((item) =>
           item.productinfo.map((prod) => ({

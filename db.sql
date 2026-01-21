@@ -365,6 +365,7 @@ CREATE TABLE messages (
     receiver_role VARCHAR(50) NOT NULL, -- 'admin', 'seller', 'customer'
     content TEXT NOT NULL,
     read_status BOOLEAN DEFAULT FALSE,
+    image_url TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

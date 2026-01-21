@@ -65,7 +65,7 @@ async function generateUsername(email, pool, tableName = "users") {
     // Database check
     const result = await pool.query(
       `SELECT 1 FROM ${tableName} WHERE user_name = $1 LIMIT 1`,
-      [username]
+      [username],
     );
 
     if (result.rowCount === 0) break; // Unique username পেয়েছি
@@ -112,7 +112,7 @@ passport.use(
         // Check if user exists
         const result = await pool.query(
           "SELECT * FROM users WHERE email=$1 OR google_id=$2;",
-          [email, profile.id]
+          [email, profile.id],
         );
 
         let user;
@@ -149,7 +149,7 @@ passport.use(
               __dirname,
               "uploads",
               "users",
-              `${name}`
+              `${name}`,
             );
             if (!fs.existsSync(uploadDir))
               fs.mkdirSync(uploadDir, { recursive: true });
@@ -176,7 +176,7 @@ passport.use(
               savedPath,
               new Date(),
               "customer",
-            ]
+            ],
           );
 
           user = insertResult.rows[0];
@@ -186,8 +186,8 @@ passport.use(
       } catch (err) {
         cb(err, null);
       }
-    }
-  )
+    },
+  ),
 );
 
 /** Passport JWT Strategy **/
@@ -218,7 +218,7 @@ passport.use(
       console.error("JWT Strategy error:", err);
       return done(err, false);
     }
-  })
+  }),
 );
 
 const verifyAdmin = async (req, res, next) => {
@@ -245,7 +245,7 @@ app.use(
   cors({
     origin: [`${process.env.BASEURL}`],
     credentials: true,
-  })
+  }),
 );
 
 app.use(express.json({ limit: "50mb" }));
@@ -315,6 +315,7 @@ const IMAGE_COLUMNS = [
   { table: "wishlist", column: "img" },
   { table: "admins", column: "profile_img" },
   { table: "admins", column: "store_img" },
+  { table: "messages", column: "image_url" },
 ];
 
 // Get referenced images from DB
@@ -334,7 +335,7 @@ async function getReferencedImages() {
         val.reviews.forEach(
           (r) =>
             Array.isArray(r.images) &&
-            r.images.forEach((img) => referenced.add(img))
+            r.images.forEach((img) => referenced.add(img)),
         );
       } else if (Array.isArray(val?.images))
         val.images.forEach((img) => referenced.add(img));
@@ -383,12 +384,15 @@ async function run() {
     const passwordRegex =
       /^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+=<>?])[A-Za-z\d!@#$%^&*()_\-+=<>?]{8,}$/;
     const CATEGORY_COMMISSION = {
-      Fashion: 0.1,
-      Electronics: 0.05,
-      "Health & Beauty": 0.12,
-      Sports: 0.08,
-      Groceries: 0.03,
-      "Home & Living": 0.04,
+      Electronics: 0.04, // 4%
+      Fashion: 0.08, // 8%
+      "Health & Beauty": 0.1, // 10%
+      "Furniture & Home Decor": 0.06, // 6%
+      "Sports & Outdoors": 0.06, // 6%
+      "Toys & Baby Products": 0.05, // 5%
+      "Automotive & Industrial": 0.05, // 5%
+      "Grocery & Food Items": 0.03, // 3%
+      "Pets & Pet Care": 0.04, // 4%
     };
 
     // Database connection and operations would go here
@@ -411,7 +415,7 @@ async function run() {
 
         if (unusedFiles.length) {
           console.log(
-            `Found ${unusedFiles.length} unused images. Moving to backup...`
+            `Found ${unusedFiles.length} unused images. Moving to backup...`,
           );
           await sendEmail(
             process.env.SUPER_ADMIN,
@@ -433,7 +437,7 @@ async function run() {
             ${new Date().toLocaleString()}
           </p>
         </div>
-        `
+        `,
           );
           moveUnusedImages(unusedFiles);
         } else {
@@ -466,11 +470,11 @@ async function run() {
       try {
         // Update trending products
         const query = `
-      -- Set trending = true for products sold in last 7 days AND rating criteria
+      
       UPDATE products p
       SET istrending = true
       FROM (
-          SELECT (prod->>'product_Id') AS product_id, SUM((prod->>'qty')::int) AS sold_qty
+          SELECT (prod->>'product_Id') AS product_id, SUM((prod->>'qty')::int) AS sold
           FROM orders o
           CROSS JOIN LATERAL jsonb_array_elements(o.order_items) AS item
           CROSS JOIN LATERAL jsonb_array_elements(item->'productinfo') AS prod
@@ -534,7 +538,7 @@ async function run() {
           } catch (err) {
             console.error(
               `[FlashSale] Invalid JSON for sale id ${sale.id}`,
-              err.message
+              err.message,
             );
             continue;
           }
@@ -542,7 +546,7 @@ async function run() {
           for (const flashProd of flashProducts) {
             const productRes = await pool.query(
               `SELECT * FROM products WHERE id = $1`,
-              [flashProd.id]
+              [flashProd.id],
             );
             if (productRes.rowCount === 0) continue;
 
@@ -566,7 +570,7 @@ async function run() {
               };
               mainProduct.stock = updatedVariants.reduce(
                 (sum, v) => sum + (v.stock || 0),
-                0
+                0,
               );
             } else {
               mainProduct.stock =
@@ -583,7 +587,7 @@ async function run() {
                 JSON.stringify(mainProduct.extras || {}),
                 mainProduct.isflashsale,
                 mainProduct.id,
-              ]
+              ],
             );
             // 🔹 Update carts: reset flash price & regular price
             // 🔹 Update carts: reset flash price & regular price
@@ -595,7 +599,7 @@ async function run() {
        FROM jsonb_array_elements(productinfo) AS prod
        WHERE prod->>'product_Id' = $1
      )`,
-              [mainProduct.id] // mainProduct.id string হিসেবে pass করতে হবে
+              [mainProduct.id], // mainProduct.id string হিসেবে pass করতে হবে
             );
 
             const updatePromises = cartsRes.rows.map(async (cart) => {
@@ -616,7 +620,7 @@ async function run() {
 
               const result = await pool.query(
                 `UPDATE carts SET productinfo = $1 WHERE cart_id = $2`,
-                [JSON.stringify(updatedProductInfo), cart.cartid]
+                [JSON.stringify(updatedProductInfo), cart.cartid],
               );
 
               return result;
@@ -630,7 +634,7 @@ async function run() {
         const idsToDelete = flashSales.map((f) => f.id);
         await pool.query(
           `DELETE FROM flashSaleProducts WHERE id = ANY($1::int[])`,
-          [idsToDelete]
+          [idsToDelete],
         );
       } catch (err) {
         console.error("[FlashSale] Cron auto-delete error:", err);
@@ -641,7 +645,7 @@ async function run() {
     cron.schedule("0 0 * * *", async () => {
       try {
         const settingsRes = await pool.query(
-          "SELECT is_auto_enabled FROM flash_sale_settings WHERE id=1;"
+          "SELECT is_auto_enabled FROM flash_sale_settings WHERE id=1;",
         );
         if (!settingsRes.rows[0].is_auto_enabled) {
           return;
@@ -652,7 +656,7 @@ async function run() {
         // Check for active flash sale
         const activeRes = await pool.query(
           `SELECT * FROM flashSaleProducts WHERE isactive = true AND end_time > $1 LIMIT 1;`,
-          [now]
+          [now],
         );
 
         if (activeRes.rows.length > 0) {
@@ -665,7 +669,7 @@ async function run() {
 
         // Candidate filter
         const candidates = allProducts.filter(
-          (p) => (p.rating > 4.5 || p.isnew) && p.stock > 30
+          (p) => (p.rating > 4.5 || p.isnew) && p.stock > 30,
         );
 
         if (!candidates.length) {
@@ -708,7 +712,7 @@ async function run() {
 
               const variantSalePrice = Math.round(
                 (variant.regular_price ?? 0) -
-                  ((variant.regular_price ?? 0) * discount) / 100
+                  ((variant.regular_price ?? 0) * discount) / 100,
               );
 
               // flash sale variant
@@ -730,7 +734,7 @@ async function run() {
               extras: { ...prod.extras, variants: updatedProdVariants },
               stock: updatedProdVariants.reduce(
                 (sum, v) => sum + (v.stock ?? 0),
-                0
+                0,
               ),
             };
 
@@ -739,10 +743,10 @@ async function run() {
               extras: { ...prod.extras, variants: flashSaleProdVariants },
               stock: flashSaleProdVariants.reduce(
                 (sum, v) => sum + (v.stock ?? 0),
-                0
+                0,
               ),
               sale_price: Math.round(
-                prod.regular_price - (prod.regular_price * discount) / 100
+                prod.regular_price - (prod.regular_price * discount) / 100,
               ),
             };
 
@@ -757,7 +761,7 @@ async function run() {
             const newStock = prod.stock - flashSaleStock;
             const salePrice = Math.round(
               (prod.regular_price ?? 0) -
-                ((prod.regular_price ?? 0) * discount) / 100
+                ((prod.regular_price ?? 0) * discount) / 100,
             );
 
             updatedProd = {
@@ -783,7 +787,7 @@ async function run() {
         await pool.query(
           `INSERT INTO flashSaleProducts (isactive, start_time, end_time, sale_products)
        VALUES (true, $1, $2, $3);`,
-          [startTime, endTime, JSON.stringify(flashSalePayload)]
+          [startTime, endTime, JSON.stringify(flashSalePayload)],
         );
 
         await Promise.all(
@@ -818,7 +822,7 @@ async function run() {
               p.id,
             ];
             await pool.query(query, values);
-          })
+          }),
         );
       } catch (err) {
         console.error("❌ Flash sale generation failed:", err.message);
@@ -870,14 +874,14 @@ GROUP BY c.cart_id, u.id, u.role;
     cron.schedule("0 9 * * *", async () => {
       try {
         const { rows } = await pool.query(
-          `SELECT id, created_at, expires_at FROM notifications WHERE expires_at IS NOT NULL`
+          `SELECT id, created_at, expires_at FROM notifications WHERE expires_at IS NOT NULL`,
         );
         const now = new Date();
 
         for (const row of rows) {
           const durationMs = parseDuration(row.expires_at);
           const expireTime = new Date(
-            new Date(row.created_at).getTime() + durationMs
+            new Date(row.created_at).getTime() + durationMs,
           );
 
           if (now >= expireTime) {
@@ -1158,11 +1162,11 @@ GROUP BY c.cart_id, u.id, u.role;
         // Set response headers
         res.setHeader(
           "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         );
         res.setHeader(
           "Content-Disposition",
-          "attachment; filename=Products.xlsx"
+          "attachment; filename=Products.xlsx",
         );
 
         await workbook.xlsx.write(res);
@@ -1193,7 +1197,7 @@ GROUP BY c.cart_id, u.id, u.role;
 FROM products
 WHERE product_name ILIKE $1
 ORDER BY product_name, createdAt DESC, id ASC;`,
-        [search]
+        [search],
       );
 
       // 2) Match shops (sellers)
@@ -1203,7 +1207,7 @@ FROM sellers
 WHERE store_name ILIKE $1 OR full_name ILIKE $1
 ORDER BY store_name, id ASC;
 `,
-        [search]
+        [search],
       );
 
       res.json([...productSearch.rows, ...shopSearch.rows]);
@@ -1264,7 +1268,7 @@ ORDER BY store_name, id ASC;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // DELETE : DELETE  BANNER BY ID
@@ -1288,7 +1292,19 @@ ORDER BY store_name, id ASC;
 
       async (req, res) => {
         try {
-          const query = "SELECT * FROM products;";
+          const query = `SELECT
+    p.*,
+    COALESCE(SUM((pi->>'qty')::INT)::INT, 0) AS sold
+FROM products p
+LEFT JOIN orders o
+    ON TRUE
+LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+    ON TRUE
+LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+    ON pi->>'product_Id' = p.id
+GROUP BY p.id, p.product_name
+ORDER BY sold DESC;
+`;
           const result = await pool.query(query);
           res.status(200).json({
             message: "Products route is working!",
@@ -1297,7 +1313,7 @@ ORDER BY store_name, id ASC;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     //GET: Get Single Product API Route
@@ -1307,7 +1323,22 @@ ORDER BY store_name, id ASC;
       async (req, res) => {
         try {
           const productId = req.params.id;
-          const query = "SELECT * FROM products WHERE id =$1;";
+
+          const query = `
+      SELECT
+          p.*,
+         COALESCE(SUM((pi->>'qty')::INT)::INT, 0) AS sold
+      FROM products p
+      LEFT JOIN orders o
+          ON TRUE
+      LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+          ON TRUE
+      LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+          ON pi->>'product_Id' = p.id
+      WHERE p.id = $1
+      GROUP BY p.id;
+    `;
+
           const values = [productId];
           const result = await pool.query(query, values);
 
@@ -1318,8 +1349,9 @@ ORDER BY store_name, id ASC;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
+
     //GET: Get Products By SellerId API Route
     app.get(
       "/products/seller/:sellerId",
@@ -1328,7 +1360,19 @@ ORDER BY store_name, id ASC;
         try {
           const { sellerId } = req.params;
 
-          const query = "SELECT * FROM products WHERE seller_id =$1;";
+          // const query = "SELECT * FROM products WHERE seller_id =$1;";
+          const query = `SELECT
+          p.*,
+         COALESCE(SUM((pi->>'qty')::INT)::INT, 0) AS sold
+      FROM products p
+      LEFT JOIN orders o
+          ON TRUE
+      LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+          ON TRUE
+      LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+          ON pi->>'product_Id' = p.id
+      WHERE p.seller_id = $1
+      GROUP BY p.id;`;
           const values = [sellerId];
           const result = await pool.query(query, values);
 
@@ -1339,7 +1383,7 @@ ORDER BY store_name, id ASC;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     //POST: Create Product API route
@@ -1383,7 +1427,7 @@ ORDER BY store_name, id ASC;
             sellerRole = user.role;
           } else {
             const bazarigo = await pool.query(
-              "SELECT id, full_name, store_name, role FROM admins WHERE email='bazarigo.official@gmail.com' LIMIT 1;"
+              "SELECT id, full_name, store_name, role FROM admins WHERE email='bazarigo.official@gmail.com' LIMIT 1;",
             );
             if (bazarigo.rows.length > 0) {
               sellerId = bazarigo.rows[0].id;
@@ -1443,7 +1487,7 @@ ORDER BY store_name, id ASC;
               const mime = file.mimetype;
 
               if (mime.startsWith("image")) {
-                const filename = `${productName}-${i}.webp`;
+                const filename = `${productName}-${productId}.webp`;
                 const filepath = path.join(uploadDirs.image, filename);
                 await sharp(file.buffer)
                   .webp({ lossless: true })
@@ -1457,7 +1501,7 @@ ORDER BY store_name, id ASC;
                 return `/uploads/products/videos/${filename}`;
               }
               return null;
-            })
+            }),
           );
 
           const query = `
@@ -1513,7 +1557,7 @@ ORDER BY store_name, id ASC;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
     //POST: Bulk Product Upload API Route
     app.post(
@@ -1545,7 +1589,7 @@ ORDER BY store_name, id ASC;
             } else {
               // Admin এর ক্ষেত্রে `bazarigo` স্টোর ব্যবহার
               const bazarigo = await pool.query(
-                "SELECT id, full_name, store_name,role FROM admins WHERE email='bazarigo.official@gmail.com' LIMIT 1;"
+                "SELECT id, full_name, store_name,role FROM admins WHERE email='bazarigo.official@gmail.com' LIMIT 1;",
               );
               if (bazarigo.rows.length > 0) {
                 sellerId = bazarigo.rows[0].id;
@@ -1608,13 +1652,13 @@ ORDER BY store_name, id ASC;
                   if (imgStr.startsWith("data:image/")) {
                     const base64Data = imgStr.replace(
                       /^data:image\/\w+;base64,/,
-                      ""
+                      "",
                     );
                     const buffer = Buffer.from(base64Data, "base64");
 
                     const safeName = (item.productName || "product").replace(
                       /\s+/g,
-                      "_"
+                      "_",
                     );
                     const filename = `${safeName}-${uuidv4()}.webp`;
                     const uploadDir = path.join(__dirname, "uploads");
@@ -1631,7 +1675,7 @@ ORDER BY store_name, id ASC;
                   } else {
                     return imgStr.trim();
                   }
-                })
+                }),
               )
             ).filter(Boolean);
 
@@ -1694,7 +1738,7 @@ ORDER BY store_name, id ASC;
           console.log("Bulk upload error:", error);
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // PUT : Update Product By ID
@@ -1768,7 +1812,7 @@ ORDER BY store_name, id ASC;
               }
 
               return null;
-            })
+            }),
           );
 
           // merge old + new
@@ -1852,7 +1896,7 @@ ORDER BY store_name, id ASC;
           console.error(err);
           res.status(500).json({ message: err.message });
         }
-      }
+      },
     );
 
     // PUT: Add a single review to a product
@@ -1875,7 +1919,7 @@ ORDER BY store_name, id ASC;
             __dirname,
             "uploads",
             "products",
-            "reviews"
+            "reviews",
           );
 
           // Ensure folder exists
@@ -1898,7 +1942,7 @@ ORDER BY store_name, id ASC;
                 console.error(`Failed to save image ${i}:`, err.message);
                 return null;
               }
-            })
+            }),
           );
 
           const finalSavedPaths = savedPaths.filter((p) => p !== null);
@@ -1943,7 +1987,7 @@ ORDER BY store_name, id ASC;
           console.error(error);
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // PUT: Add a single question to a product
@@ -1982,7 +2026,7 @@ ORDER BY store_name, id ASC;
           // 6) admin গুলোর কাছে notification পাঠাও
           const sellerResult = await pool.query(
             "SELECT seller_id,seller_role FROM products WHERE id=$1",
-            [id]
+            [id],
           );
 
           await createNotification({
@@ -2006,7 +2050,7 @@ ORDER BY store_name, id ASC;
         } catch (error) {
           res.status(500).json({ success: false, error: error.message });
         }
-      }
+      },
     );
 
     // PUT: Add reply of a single question to a product
@@ -2041,13 +2085,13 @@ ORDER BY store_name, id ASC;
             updatedQuestions = questions.map((q) =>
               q.id === q_id
                 ? { ...q, answer, answeredBySeller: true, replyDate }
-                : q
+                : q,
             );
           } else {
             updatedQuestions = questions.map((q) =>
               q.id === q_id
                 ? { ...q, answer, answeredByAdmin: true, replyDate }
-                : q
+                : q,
             );
           }
 
@@ -2084,7 +2128,7 @@ ORDER BY store_name, id ASC;
           console.error(error);
           res.status(500).json({ success: false, error: error.message });
         }
-      }
+      },
     );
 
     // DELETE Review by ID
@@ -2119,7 +2163,7 @@ ORDER BY store_name, id ASC;
           console.error(error);
           res.status(500).json({ success: false, error: error.message });
         }
-      }
+      },
     );
 
     //DELETE: BULK Delete  Product API Route
@@ -2137,7 +2181,7 @@ ORDER BY store_name, id ASC;
           if (user.role === "moderator") {
             const { rows } = await pool.query(
               `SELECT id FROM products WHERE id = ANY($1) AND "canDeleteByModerator" = true`,
-              [ids]
+              [ids],
             );
             deletableIds = rows.map((r) => r.id);
 
@@ -2155,7 +2199,7 @@ ORDER BY store_name, id ASC;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     //DELETE: Delete Single Product API Route
@@ -2171,7 +2215,7 @@ ORDER BY store_name, id ASC;
           if (user.role === "moderator") {
             const { rows } = await pool.query(
               'SELECT id FROM products WHERE id = $1 AND "canDeleteByModerator" = true',
-              [productId]
+              [productId],
             );
 
             if (rows.length === 0) {
@@ -2190,19 +2234,39 @@ ORDER BY store_name, id ASC;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     //GET: Just Arrived API Route
     app.get("/just-arrived", async (req, res) => {
       try {
         const query = `
-      SELECT id, product_name,regular_price, sale_price, discount, rating,category, isBestSeller, isNew, images,reviews
-      FROM products
-      WHERE isnew=$1 AND createdat >= NOW() - INTERVAL '15 days'
-      ORDER BY createdat DESC
-      LIMIT 20;
-    `;
+  SELECT 
+    p.id,
+    p.product_name,
+    p.regular_price,
+    p.sale_price,
+    p.discount,
+    p.rating,
+    p.category,
+    p.isbestseller,
+    p.isnew,
+    p.images,
+    p.reviews,
+    COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
+  FROM products p
+  LEFT JOIN orders o
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+    ON pi->>'product_Id' = p.id
+  WHERE p.isnew = $1 
+    AND p.createdat >= NOW() - INTERVAL '15 days'
+  GROUP BY p.id
+  ORDER BY p.createdat DESC
+  LIMIT 20;
+`;
 
         const result = await pool.query(query, [true]);
 
@@ -2230,16 +2294,16 @@ ORDER BY store_name, id ASC;
             p.isBestSeller,
             p.isNew,
             p.reviews,
-            SUM((prod->>'qty')::int) AS sold_quantity,
-            true AS istrending
+            SUM((prod->>'qty')::int) AS sold
         FROM products p
         JOIN orders o
             ON o.order_date >= NOW() - INTERVAL '7 days'
         CROSS JOIN LATERAL jsonb_array_elements(o.order_items) AS item
         CROSS JOIN LATERAL jsonb_array_elements(item->'productinfo') AS prod
         WHERE (prod->>'product_Id') = p.id
+          AND p.istrending = true
         GROUP BY p.id
-        HAVING SUM((prod->>'qty')::int) >= 1
+        HAVING SUM((prod->>'qty')::int) >= 5
            AND (
                p.rating >= 4
                OR COALESCE((
@@ -2247,15 +2311,386 @@ ORDER BY store_name, id ASC;
                    FROM unnest(p.reviews) AS r
                ), 0) >= 4
            )
-        ORDER BY sold_quantity DESC
+        ORDER BY sold DESC
         LIMIT 20;
 
                 `;
 
         const result = await pool.query(query);
+
         return res.status(200).json({
           message: "Trending Products route is working!",
 
+          products: result.rows,
+        });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+    //GET: Electronics API Route
+    app.get("/electronics", async (req, res) => {
+      try {
+        const query = `
+  SELECT 
+    p.id,
+    p.product_name,
+    p.regular_price,
+    p.sale_price,
+    p.discount,
+    p.rating,
+    p.category,
+    p.isbestseller,
+    p.isnew,
+    p.images,
+    p.reviews,
+    COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
+  FROM products p
+  LEFT JOIN orders o
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+    ON pi->>'product_Id' = p.id
+  WHERE p.isnew = $1 
+    AND p.category = 'Electronics'
+  GROUP BY p.id
+ ORDER BY RANDOM()
+  LIMIT 4;
+`;
+
+        const result = await pool.query(query, [false]);
+
+        res.status(200).json({
+          message: "Electronics route is working!",
+          products: result.rows,
+        });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+    //GET: Fashion API Route
+    app.get("/fashion", async (req, res) => {
+      try {
+        const query = `
+  SELECT 
+    p.id,
+    p.product_name,
+    p.regular_price,
+    p.sale_price,
+    p.discount,
+    p.rating,
+    p.category,
+    p.isbestseller,
+    p.isnew,
+    p.images,
+    p.reviews,
+    COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
+  FROM products p
+  LEFT JOIN orders o
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+    ON pi->>'product_Id' = p.id
+  WHERE p.isnew = $1 
+    AND p.category = 'Fashion'
+  GROUP BY p.id
+ ORDER BY RANDOM()
+  LIMIT 4;
+`;
+
+        const result = await pool.query(query, [false]);
+
+        res.status(200).json({
+          message: "Fashion route is working!",
+          products: result.rows,
+        });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+    //GET: Health & Beauty API Route
+    app.get("/health-beauty", async (req, res) => {
+      try {
+        const query = `
+  SELECT 
+    p.id,
+    p.product_name,
+    p.regular_price,
+    p.sale_price,
+    p.discount,
+    p.rating,
+    p.category,
+    p.isbestseller,
+    p.isnew,
+    p.images,
+    p.reviews,
+    COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
+  FROM products p
+  LEFT JOIN orders o
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+    ON pi->>'product_Id' = p.id
+  WHERE p.isnew = $1 
+    AND p.category = 'Health & Beauty'
+  GROUP BY p.id
+ ORDER BY RANDOM()
+  LIMIT 4;
+`;
+
+        const result = await pool.query(query, [false]);
+
+        res.status(200).json({
+          message: "Health & Beauty route is working!",
+          products: result.rows,
+        });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+    //GET: Furniture & Home Decor API Route
+    app.get("/furniture-home-decor", async (req, res) => {
+      try {
+        const query = `
+  SELECT 
+    p.id,
+    p.product_name,
+    p.regular_price,
+    p.sale_price,
+    p.discount,
+    p.rating,
+    p.category,
+    p.isbestseller,
+    p.isnew,
+    p.images,
+    p.reviews,
+    COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
+  FROM products p
+  LEFT JOIN orders o
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+    ON pi->>'product_Id' = p.id
+  WHERE p.isnew = $1 
+    AND p.category = 'Furniture & Home Decor'
+  GROUP BY p.id
+ ORDER BY RANDOM()
+  LIMIT 4;
+`;
+
+        const result = await pool.query(query, [false]);
+
+        res.status(200).json({
+          message: "Furniture & Home Decor route is working!",
+          products: result.rows,
+        });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+    //GET: Sports & Outdoors API Route
+    app.get("/sports-outdoors", async (req, res) => {
+      try {
+        const query = `
+  SELECT 
+    p.id,
+    p.product_name,
+    p.regular_price,
+    p.sale_price,
+    p.discount,
+    p.rating,
+    p.category,
+    p.isbestseller,
+    p.isnew,
+    p.images,
+    p.reviews,
+    COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
+  FROM products p
+  LEFT JOIN orders o
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+    ON pi->>'product_Id' = p.id
+  WHERE p.isnew = $1 
+    AND p.category = 'Sports & Outdoors'
+  GROUP BY p.id
+ ORDER BY RANDOM()
+  LIMIT 4;
+`;
+
+        const result = await pool.query(query, [false]);
+
+        res.status(200).json({
+          message: "Sports & Outdoors route is working!",
+          products: result.rows,
+        });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+    //GET: Toys & Baby Products API Route
+    app.get("/toys-baby-products", async (req, res) => {
+      try {
+        const query = `
+  SELECT 
+    p.id,
+    p.product_name,
+    p.regular_price,
+    p.sale_price,
+    p.discount,
+    p.rating,
+    p.category,
+    p.isbestseller,
+    p.isnew,
+    p.images,
+    p.reviews,
+    COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
+  FROM products p
+  LEFT JOIN orders o
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+    ON pi->>'product_Id' = p.id
+  WHERE p.isnew = $1 
+    AND p.category = 'Toys & Baby Products'
+  GROUP BY p.id
+ ORDER BY RANDOM()
+  LIMIT 4;
+`;
+
+        const result = await pool.query(query, [false]);
+
+        res.status(200).json({
+          message: "Toys & Baby Products route is working!",
+          products: result.rows,
+        });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+    //GET: Automotive & Industrial API Route
+    app.get("/automotive-industrial", async (req, res) => {
+      try {
+        const query = `
+  SELECT 
+    p.id,
+    p.product_name,
+    p.regular_price,
+    p.sale_price,
+    p.discount,
+    p.rating,
+    p.category,
+    p.isbestseller,
+    p.isnew,
+    p.images,
+    p.reviews,
+    COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
+  FROM products p
+  LEFT JOIN orders o
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+    ON pi->>'product_Id' = p.id
+  WHERE p.isnew = $1 
+    AND p.category = 'Automotive & Industrial'
+  GROUP BY p.id
+ ORDER BY RANDOM()
+  LIMIT 4;
+`;
+
+        const result = await pool.query(query, [false]);
+
+        res.status(200).json({
+          message: "Automotive & Industrial route is working!",
+          products: result.rows,
+        });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+    //GET: Grocery & Food Items API Route
+    app.get("/grocery-food-items", async (req, res) => {
+      try {
+        const query = `
+  SELECT 
+    p.id,
+    p.product_name,
+    p.regular_price,
+    p.sale_price,
+    p.discount,
+    p.rating,
+    p.category,
+    p.isbestseller,
+    p.isnew,
+    p.images,
+    p.reviews,
+    COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
+  FROM products p
+  LEFT JOIN orders o
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+    ON pi->>'product_Id' = p.id
+  WHERE p.isnew = $1 
+    AND p.category = 'Grocery & Food Items'
+  GROUP BY p.id
+ ORDER BY RANDOM()
+  LIMIT 4;
+`;
+
+        const result = await pool.query(query, [false]);
+
+        res.status(200).json({
+          message: "Grocery & Food Items route is working!",
+          products: result.rows,
+        });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+    //GET: Pets & Pet Care API Route
+    app.get("/pets-pet-care", async (req, res) => {
+      try {
+        const query = `
+  SELECT 
+    p.id,
+    p.product_name,
+    p.regular_price,
+    p.sale_price,
+    p.discount,
+    p.rating,
+    p.category,
+    p.isbestseller,
+    p.isnew,
+    p.images,
+    p.reviews,
+    COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
+  FROM products p
+  LEFT JOIN orders o
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+    ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+    ON pi->>'product_Id' = p.id
+  WHERE p.isnew = $1 
+    AND p.category = 'Pets & Pet Care'
+  GROUP BY p.id
+ ORDER BY RANDOM()
+  LIMIT 4;
+`;
+
+        const result = await pool.query(query, [false]);
+
+        res.status(200).json({
+          message: "Pets & Pet Care route is working!",
           products: result.rows,
         });
       } catch (error) {
@@ -2275,7 +2710,7 @@ ORDER BY store_name, id ASC;
         await client.query(
           `UPDATE flashSaleProducts SET isactive = false WHERE end_time < $1
 `,
-          [nowInSeconds]
+          [nowInSeconds],
         );
         const query = `SELECT * FROM flashSaleProducts ORDER BY start_time ASC;`;
         const result = await client.query(query);
@@ -2295,7 +2730,7 @@ ORDER BY store_name, id ASC;
           // ১️⃣ flashSaleProducts.isactive আপডেট
           await client.query(
             `UPDATE flashSaleProducts SET isactive = $1 WHERE id = $2`,
-            [shouldBeActive, sale.id]
+            [shouldBeActive, sale.id],
           );
 
           const saleProducts = sale.sale_products || [];
@@ -2305,7 +2740,7 @@ ORDER BY store_name, id ASC;
             // ২️⃣ মূল products টেবিলের isflashsale আপডেট
             await client.query(
               `UPDATE products SET isflashsale = $1 WHERE id = ANY($2)`,
-              [shouldBeActive, productIds]
+              [shouldBeActive, productIds],
             );
 
             // ৩️⃣ flashSaleProducts JSON ফিল্ডের প্রতিটি প্রোডাক্টে isflashsale মান আপডেট
@@ -2316,7 +2751,7 @@ ORDER BY store_name, id ASC;
 
             await client.query(
               `UPDATE flashSaleProducts SET sale_products = $1 WHERE id = $2`,
-              [JSON.stringify(updatedSaleProducts), sale.id]
+              [JSON.stringify(updatedSaleProducts), sale.id],
             );
           }
 
@@ -2420,7 +2855,7 @@ ORDER BY store_name, id ASC;
         for (const flashProd of saleProducts) {
           const productRes = await pool.query(
             `SELECT * FROM products WHERE id = $1`,
-            [flashProd.id]
+            [flashProd.id],
           );
 
           if (productRes.rowCount === 0) continue;
@@ -2444,7 +2879,7 @@ ORDER BY store_name, id ASC;
 
             mainProduct.stock = updatedVariants.reduce(
               (sum, v) => sum + (v.stock || 0),
-              0
+              0,
             );
           }
           // 👉 No variant → single product
@@ -2465,7 +2900,7 @@ ORDER BY store_name, id ASC;
               JSON.stringify(mainProduct.extras || {}),
               mainProduct.isflashsale,
               mainProduct.id,
-            ]
+            ],
           );
           // 🔹 Update carts: reset flash price & regular price
           const cartsRes = await pool.query(
@@ -2476,7 +2911,7 @@ ORDER BY store_name, id ASC;
      FROM jsonb_array_elements(productinfo) AS prod
      WHERE prod->>'product_Id' = $1
    )`,
-            [mainProduct.id] // mainProduct.id string হিসেবে pass করতে হবে
+            [mainProduct.id], // mainProduct.id string হিসেবে pass করতে হবে
           );
 
           const updatePromises = cartsRes.rows.map(async (cart) => {
@@ -2497,7 +2932,7 @@ ORDER BY store_name, id ASC;
 
             const result = await pool.query(
               `UPDATE carts SET productinfo = $1 WHERE cart_id = $2`,
-              [JSON.stringify(updatedProductInfo), cart.cartid]
+              [JSON.stringify(updatedProductInfo), cart.cartid],
             );
 
             return result;
@@ -2534,7 +2969,7 @@ ORDER BY store_name, id ASC;
            jsonb_array_elements(f.sale_products) AS item
       WHERE item->>'id' = $1
       `,
-          [id]
+          [id],
         );
 
         if (flashRes.rowCount === 0) {
@@ -2547,7 +2982,7 @@ ORDER BY store_name, id ASC;
         // 2️⃣ main product
         const productRes = await client.query(
           `SELECT * FROM products WHERE id = $1`,
-          [flashProduct.id]
+          [flashProduct.id],
         );
 
         if (productRes.rowCount > 0) {
@@ -2570,7 +3005,7 @@ ORDER BY store_name, id ASC;
 
             mainProduct.stock = updatedVariants.reduce(
               (sum, v) => sum + (v.stock || 0),
-              0
+              0,
             );
           }
           // 👉 Single product
@@ -2592,7 +3027,7 @@ ORDER BY store_name, id ASC;
               mainProduct.stock,
               JSON.stringify(mainProduct.extras || {}),
               mainProduct.id,
-            ]
+            ],
           );
 
           // 4️⃣ carts update (⚠️ CAST FIXED)
@@ -2623,7 +3058,7 @@ ORDER BY store_name, id ASC;
               mainProduct.id,
               mainProduct.sale_price || 0,
               mainProduct.regular_price || 0,
-            ]
+            ],
           );
         }
 
@@ -2638,7 +3073,7 @@ ORDER BY store_name, id ASC;
       )
       WHERE id = $2
       `,
-          [id, flashSaleId]
+          [id, flashSaleId],
         );
 
         // 6️⃣ empty flash sale delete
@@ -2646,7 +3081,7 @@ ORDER BY store_name, id ASC;
           `
       DELETE FROM flashSaleProducts
       WHERE sale_products = '[]'::jsonb
-      `
+      `,
         );
 
         await client.query("COMMIT");
@@ -2668,7 +3103,7 @@ ORDER BY store_name, id ASC;
       const { enable } = req.body;
       try {
         const existing = await pool.query(
-          "SELECT * FROM flash_sale_settings LIMIT 1;"
+          "SELECT * FROM flash_sale_settings LIMIT 1;",
         );
         if (existing.rows.length) {
           return res
@@ -2680,7 +3115,7 @@ ORDER BY store_name, id ASC;
           `INSERT INTO flash_sale_settings (is_auto_enabled, last_updated) 
        VALUES ($1, NOW())
        RETURNING *;`,
-          [enable]
+          [enable],
         );
         res.status(201).json({ success: true, setting: result.rowCount });
       } catch (err) {
@@ -2694,7 +3129,7 @@ ORDER BY store_name, id ASC;
       try {
         const result = await pool.query(
           "UPDATE flash_sale_settings SET is_auto_enabled=$1 WHERE id=1",
-          [enable]
+          [enable],
         );
         res.json({ success: true, enable });
       } catch (err) {
@@ -2718,7 +3153,7 @@ ORDER BY store_name, id ASC;
           console.error(error);
           res.status(500).json({ message: "Server error" });
         }
-      }
+      },
     );
 
     // ------------ Products API Routes End ----------------//
@@ -2762,7 +3197,7 @@ ORDER BY stock ASC;
             message: error.message,
           });
         }
-      }
+      },
     );
 
     // PATCH: Update Inventory Products Stocks
@@ -2964,7 +3399,7 @@ ORDER BY stock ASC;
 
           const productResult = await pool.query(
             productQuery,
-            isModerator ? [productId] : [productId, sellerId]
+            isModerator ? [productId] : [productId, sellerId],
           );
 
           if (productResult.rows.length === 0) {
@@ -3010,7 +3445,7 @@ ORDER BY stock ASC;
 
             const updateResult = await pool.query(
               `UPDATE products SET stock = $1 WHERE id = $2`,
-              [newStock, productId]
+              [newStock, productId],
             );
 
             return res.json({
@@ -3029,7 +3464,7 @@ ORDER BY stock ASC;
 
           variants[variantIndex].stock = Math.max(
             variants[variantIndex].stock + change,
-            0
+            0,
           );
 
           const newVariantStock = variants[variantIndex].stock;
@@ -3067,7 +3502,7 @@ ORDER BY stock ASC;
         SET extras = $1, stock = $2
         WHERE id = $3
         `,
-            [{ ...extras, variants }, totalStock, productId]
+            [{ ...extras, variants }, totalStock, productId],
           );
 
           res.json({
@@ -3079,7 +3514,7 @@ ORDER BY stock ASC;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // PATCH: Update Inventory All Products Stocks
@@ -3099,7 +3534,7 @@ ORDER BY stock ASC;
           if (req.user.role === "moderator" || req.user.role === "admin") {
             const { rows: products } = await pool.query(
               "SELECT id, seller_id, product_name, extras, stock FROM products WHERE seller_role='super admin' AND id=$1",
-              [productId]
+              [productId],
             );
 
             let updateCount = 0;
@@ -3143,7 +3578,7 @@ ORDER BY stock ASC;
 
                 totalStock = variants.reduce(
                   (sum, v) => sum + (v.stock || 0),
-                  0
+                  0,
                 );
                 extras.variants = variants;
               } else {
@@ -3178,7 +3613,7 @@ ORDER BY stock ASC;
               // Save update in DB
               await pool.query(
                 `UPDATE products SET extras=$1, stock=$2 WHERE id=$3`,
-                [extras, totalStock, product.id]
+                [extras, totalStock, product.id],
               );
 
               updateCount++;
@@ -3194,7 +3629,7 @@ ORDER BY stock ASC;
           // Load products
           const { rows: products } = await pool.query(
             "SELECT id, seller_id, product_name, extras, stock FROM products WHERE seller_id=$1 AND id=$2",
-            [sellerId, productId]
+            [sellerId, productId],
           );
 
           let updateCount = 0;
@@ -3270,7 +3705,7 @@ ORDER BY stock ASC;
             // Save update in DB
             await pool.query(
               `UPDATE products SET extras=$1, stock=$2 WHERE id=$3`,
-              [extras, totalStock, product.id]
+              [extras, totalStock, product.id],
             );
 
             updateCount++;
@@ -3284,7 +3719,7 @@ ORDER BY stock ASC;
         } catch (err) {
           res.status(500).json({ message: err.message });
         }
-      }
+      },
     );
 
     // ------------ Inventory API Routes End ------------//
@@ -3336,7 +3771,7 @@ ORDER BY stock ASC;
             __dirname,
             "uploads",
             "sellers",
-            `${sellerInfo.full_Name}`
+            `${sellerInfo.full_Name}`,
           );
           if (!fs.existsSync(uploadDir))
             fs.mkdirSync(uploadDir, { recursive: true });
@@ -3353,15 +3788,15 @@ ORDER BY stock ASC;
 
           const profileImgPath = await saveMulterImage(
             files?.profileImg?.[0],
-            "profile"
+            "profile",
           );
           const nidFrontPath = await saveMulterImage(
             files?.nidFrontImg?.[0],
-            "nid_front"
+            "nid_front",
           );
           const nidBackPath = await saveMulterImage(
             files?.nidBackImg?.[0],
-            "nid_back"
+            "nid_back",
           );
 
           // Prepare temp_data for OTP verification
@@ -3419,7 +3854,7 @@ ORDER BY stock ASC;
         } catch (error) {
           res.status(500).json({ message: "Internal server error" });
         }
-      }
+      },
     );
     app.post(
       "/sellers",
@@ -3466,7 +3901,7 @@ ORDER BY stock ASC;
             __dirname,
             "uploads",
             "sellers",
-            `${sellerInfo.full_Name}`
+            `${sellerInfo.full_Name}`,
           );
           if (!fs.existsSync(uploadDir))
             fs.mkdirSync(uploadDir, { recursive: true });
@@ -3483,15 +3918,15 @@ ORDER BY stock ASC;
 
           const profileImgPath = await saveMulterImage(
             files?.profileImg?.[0],
-            "profile"
+            "profile",
           );
           const nidFrontPath = await saveMulterImage(
             files?.nidFrontImg?.[0],
-            "nid_front"
+            "nid_front",
           );
           const nidBackPath = await saveMulterImage(
             files?.nidBackImg?.[0],
-            "nid_back"
+            "nid_back",
           );
 
           // Prepare temp_data for OTP verification
@@ -3535,7 +3970,7 @@ ORDER BY stock ASC;
           // Save OTP + temp_data
           await pool.query(
             "INSERT INTO email_otps (email, otp, expires_at, temp_data) VALUES ($1,$2,$3,$4)",
-            [email, otp, expiresAt, JSON.stringify(tempData)]
+            [email, otp, expiresAt, JSON.stringify(tempData)],
           );
 
           // Send OTP email
@@ -3555,7 +3990,7 @@ ORDER BY stock ASC;
     &copy; ${new Date().getFullYear()} Bazaarigo. All rights reserved.
   </p>
 </div>
-`
+`,
           );
 
           return res.status(200).json({
@@ -3565,7 +4000,7 @@ ORDER BY stock ASC;
         } catch (error) {
           res.status(500).json({ message: "Internal server error" });
         }
-      }
+      },
     );
 
     // PUT: Seller Settings API Route
@@ -3587,7 +4022,7 @@ ORDER BY stock ASC;
           // Fetch old seller
           const { rows } = await pool.query(
             "SELECT * FROM sellers WHERE id=$1",
-            [sellerId]
+            [sellerId],
           );
           if (rows.length === 0)
             return res.status(404).json({ message: "Seller not found" });
@@ -3614,25 +4049,25 @@ ORDER BY stock ASC;
           const profile_imgPath = await saveMulterImage(
             files?.profileImg?.[0],
             "profile",
-            payload.full_name || oldSeller.full_name
+            payload.full_name || oldSeller.full_name,
           );
 
           const store_imgPath = await saveMulterImage(
             files?.storeImg?.[0],
             "store",
-            payload.store_name || oldSeller.store_name
+            payload.store_name || oldSeller.store_name,
           );
 
           const nid_front_filePath = await saveMulterImage(
             files?.nidFrontImg?.[0],
             "nid_front",
-            payload.full_name || oldSeller.full_name
+            payload.full_name || oldSeller.full_name,
           );
 
           const nid_back_filePath = await saveMulterImage(
             files?.nidBackImg?.[0],
             "nid_back",
-            payload.full_name || oldSeller.full_name
+            payload.full_name || oldSeller.full_name,
           );
 
           // Password hash
@@ -3640,7 +4075,7 @@ ORDER BY stock ASC;
           if (payload.old_password && payload.new_password) {
             const match = await bcrypt.compare(
               payload.old_password,
-              oldSeller.password
+              oldSeller.password,
             );
             if (!match)
               return res
@@ -3723,7 +4158,7 @@ ORDER BY stock ASC;
         } catch (error) {
           res.status(500).json({ message: "Internal server error" });
         }
-      }
+      },
     );
     // PATCH: Update Seller Review API Route
     app.patch("/sellers/review/:id", async (req, res) => {
@@ -3753,13 +4188,13 @@ ORDER BY stock ASC;
         // Seller টেবিলে আপডেট
         const sellerResult = await pool.query(
           "UPDATE sellers SET reviews = $1 WHERE id = $2",
-          [updatedReviews, id]
+          [updatedReviews, id],
         );
 
         // Admin টেবিলে আপডেট
         const adminResult = await pool.query(
           "UPDATE admins SET reviews = $1 WHERE id = $2",
-          [updatedReviews, id]
+          [updatedReviews, id],
         );
 
         res.status(200).json({
@@ -3850,7 +4285,7 @@ ORDER BY stock ASC;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
     // GET: Get Seller By Id API Route
     app.get(
@@ -3875,7 +4310,7 @@ ORDER BY stock ASC;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
     // Delete: Delete Seller By Id API Route
     app.delete("/sellers/bulk", async (req, res) => {
@@ -3917,12 +4352,12 @@ ORDER BY stock ASC;
       try {
         const payload = jwt.verify(
           refreshToken,
-          process.env.REFRESH_TOKEN_SECRET
+          process.env.REFRESH_TOKEN_SECRET,
         );
         const newAccessToken = jwt.sign(
           { id: payload.id, email: payload.email, role: payload.role },
           process.env.JWT_SECRET_KEY,
-          { expiresIn: "7d" }
+          { expiresIn: "7d" },
         );
 
         // res
@@ -4006,7 +4441,7 @@ ORDER BY stock ASC;
           process.env.REFRESH_TOKEN_SECRET,
           {
             expiresIn: "30d", // long-lived token
-          }
+          },
         );
 
         // res
@@ -4041,7 +4476,7 @@ ORDER BY stock ASC;
             maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
           })
           .redirect(`${process.env.BASEURL}${redirectPath}`);
-      }
+      },
     );
     // POST: Create Users API Route
 
@@ -4072,7 +4507,7 @@ ORDER BY stock ASC;
     UNION
     SELECT email FROM admins WHERE email=$1
   `,
-          [userInfo.email]
+          [userInfo.email],
         );
 
         if (checkUser.rows.length > 0) {
@@ -4086,7 +4521,7 @@ ORDER BY stock ASC;
             __dirname,
             "uploads",
             "users",
-            `${userInfo.name}`
+            `${userInfo.name}`,
           );
           if (!fs.existsSync(uploadDir)) {
             fs.mkdirSync(uploadDir, { recursive: true });
@@ -4168,7 +4603,7 @@ ORDER BY stock ASC;
     UNION
     SELECT email FROM admins WHERE email=$1
   `,
-          [userInfo.email]
+          [userInfo.email],
         );
         if (checkUser.rows.length > 0) {
           return res.status(400).json({ message: "User Already Exists" });
@@ -4181,7 +4616,7 @@ ORDER BY stock ASC;
             __dirname,
             "uploads",
             "users",
-            `${userInfo.name}`
+            `${userInfo.name}`,
           );
           if (!fs.existsSync(uploadDir)) {
             fs.mkdirSync(uploadDir, { recursive: true });
@@ -4228,7 +4663,7 @@ ORDER BY stock ASC;
         // Save OTP + temp_data
         await pool.query(
           "INSERT INTO email_otps (email, otp, expires_at, temp_data) VALUES ($1,$2,$3,$4)",
-          [userInfo.email, otp, expiresAt, JSON.stringify(tempData)]
+          [userInfo.email, otp, expiresAt, JSON.stringify(tempData)],
         );
 
         // Send OTP email
@@ -4249,7 +4684,7 @@ ORDER BY stock ASC;
     &copy; ${new Date().getFullYear()} Bazaarigo. All rights reserved.
   </p>
 </div>
-`
+`,
         );
 
         return res
@@ -4333,10 +4768,10 @@ ORDER BY stock ASC;
             (role === "admin" || role === "super admin" || role === "moderator"
               ? "admins"
               : role === "seller"
-              ? "sellers"
-              : "users") +
+                ? "sellers"
+                : "users") +
             " SET last_login=$1 WHERE id=$2;",
-          [new Date(), user.id]
+          [new Date(), user.id],
         );
 
         // Generate OTP
@@ -4349,7 +4784,7 @@ ORDER BY stock ASC;
         // Save OTP
         await pool.query(
           "INSERT INTO email_otps (email, otp, expires_at) VALUES ($1,$2,$3)",
-          [email, otp, expiresAt]
+          [email, otp, expiresAt],
         );
 
         // Send OTP email
@@ -4370,7 +4805,7 @@ ORDER BY stock ASC;
       &copy; ${new Date().getFullYear()} Bazaarigo. All rights reserved.
     </p>
   </div>
-  `
+  `,
         );
 
         let token;
@@ -4399,7 +4834,7 @@ ORDER BY stock ASC;
         // 1️⃣ Check OTP
         const result = await pool.query(
           "SELECT * FROM email_otps WHERE email=$1 AND otp=$2",
-          [email, otp]
+          [email, otp],
         );
 
         if (result.rows.length === 0)
@@ -4465,7 +4900,7 @@ ORDER BY stock ASC;
         // 1️⃣ Check OTP
         const result = await pool.query(
           "SELECT * FROM email_otps WHERE email=$1 AND otp=$2",
-          [email, otp]
+          [email, otp],
         );
 
         if (result.rows.length === 0)
@@ -4542,8 +4977,8 @@ ORDER BY stock ASC;
                   type: "seller_request",
                   refId: tempData.id,
                   expiresAt: "30d",
-                })
-              )
+                }),
+              ),
             );
           } catch (notifError) {}
 
@@ -4572,7 +5007,7 @@ ORDER BY stock ASC;
         // 1️⃣ Check OTP in DB
         const result = await pool.query(
           "SELECT * FROM email_otps WHERE email=$1 AND otp=$2",
-          [email, otp]
+          [email, otp],
         );
 
         if (result.rows.length === 0)
@@ -4596,7 +5031,7 @@ ORDER BY stock ASC;
 
         let resultUser = await pool.query(
           "SELECT * FROM admins WHERE email=$1",
-          [email]
+          [email],
         );
         if (resultUser.rows.length > 0) {
           user = resultUser.rows[0];
@@ -4606,7 +5041,7 @@ ORDER BY stock ASC;
         if (!user) {
           resultUser = await pool.query(
             "SELECT * FROM sellers WHERE email=$1",
-            [email]
+            [email],
           );
           if (resultUser.rows.length > 0) {
             user = resultUser.rows[0];
@@ -4637,7 +5072,7 @@ ORDER BY stock ASC;
           process.env.REFRESH_TOKEN_SECRET,
           {
             expiresIn: "30d", // long-lived token
-          }
+          },
         );
 
         // res
@@ -4702,7 +5137,7 @@ ORDER BY stock ASC;
         // Save OTP
         await pool.query(
           "INSERT INTO email_otps (email, otp, expires_at) VALUES ($1,$2,$3)",
-          [email, otp, expiresAt]
+          [email, otp, expiresAt],
         );
 
         // Send OTP email
@@ -4723,7 +5158,7 @@ ORDER BY stock ASC;
       &copy; ${new Date().getFullYear()} Bazaarigo. All rights reserved.
     </p>
   </div>
-  `
+  `,
         );
         return res.json({
           message: "OTP resent successfully",
@@ -4743,7 +5178,7 @@ ORDER BY stock ASC;
           const { email } = req.query;
           const result = await pool.query(
             `SELECT * FROM email_otps WHERE email=$1`,
-            [email]
+            [email],
           );
 
           res.json(result.rows[0]);
@@ -4751,7 +5186,7 @@ ORDER BY stock ASC;
           console.error(err);
           res.status(500).json({ message: err.message });
         }
-      }
+      },
     );
     // Logout Route
     app.post("/logout", (req, res) => {
@@ -4806,7 +5241,7 @@ ORDER BY stock ASC;
     UNION
     SELECT id,email,role,'admins' AS source FROM admins WHERE email=$1
   `,
-        [email]
+        [email],
       );
       if (!user) return res.status(404).json("User not found");
 
@@ -4854,7 +5289,7 @@ ORDER BY stock ASC;
       &copy; ${new Date().getFullYear()} Bazarigo. All rights reserved.
     </p>
   </div>
-  `
+  `,
       );
 
       res.json("Reset link sent");
@@ -4883,7 +5318,7 @@ ORDER BY stock ASC;
           // update query
           const updateResult = await pool.query(
             `UPDATE ${tableMap[decoded.source]} SET password=$1 WHERE id=$2`,
-            [hashedPassword, decoded.id]
+            [hashedPassword, decoded.id],
           );
 
           res.json({
@@ -4894,7 +5329,7 @@ ORDER BY stock ASC;
           console.error(err);
           res.status(400).json({ message: "Invalid or expired token" });
         }
-      }
+      },
     );
 
     // PUT: User Settings API Route
@@ -4926,7 +5361,7 @@ ORDER BY stock ASC;
           if (file) {
             const safeName = (payload.full_name || oldUser.name).replace(
               /\s+/g,
-              "_"
+              "_",
             );
             const filename = `${safeName}_profile_${uuidv4()}.webp`;
             const filepath = path.join(uploadDir, filename);
@@ -4939,7 +5374,7 @@ ORDER BY stock ASC;
           if (payload.old_password && payload.new_password) {
             const match = await bcrypt.compare(
               payload.old_password,
-              oldUser.password
+              oldUser.password,
             );
             if (!match)
               return res
@@ -5003,7 +5438,7 @@ ORDER BY stock ASC;
           if (result.rowCount > 0) {
             const ordersResult = await pool.query(
               `SELECT * FROM orders WHERE customer_id = $1`,
-              [userId]
+              [userId],
             );
             if (ordersResult.rows.length > 0) {
               await pool.query(
@@ -5012,7 +5447,7 @@ ORDER BY stock ASC;
                   payload.full_name || oldUser.name,
                   payload.email || oldUser.email,
                   userId,
-                ]
+                ],
               );
             }
 
@@ -5027,7 +5462,7 @@ ORDER BY stock ASC;
           }
           res.status(500).json({ message: "Internal server error" });
         }
-      }
+      },
     );
 
     // GET: Get Users API Route
@@ -5089,7 +5524,7 @@ LEFT JOIN (
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     app.get(
@@ -5123,7 +5558,7 @@ LEFT JOIN (
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // Delete: Delete Users Bulk API Route
@@ -5254,7 +5689,7 @@ LEFT JOIN (
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // DELETE: Delete WishlistItems By ID API Route
@@ -5365,7 +5800,7 @@ LEFT JOIN (
           console.error(err);
           res.status(500).json({ message: "Server error" });
         }
-      }
+      },
     );
 
     // GET: Get Following List By User ID API Route
@@ -5415,7 +5850,7 @@ ORDER BY f.followed_at DESC;
           console.error(err);
           res.status(500).json({ message: "Server error" });
         }
-      }
+      },
     );
 
     // ----------- Following List API Routes End -------//
@@ -5445,7 +5880,7 @@ ORDER BY f.followed_at DESC;
           const existingProductIds = existingProducts.map((p) => p.product_Id);
 
           const newProducts = productInfo.filter(
-            (p) => !existingProductIds.includes(p.product_Id)
+            (p) => !existingProductIds.includes(p.product_Id),
           );
 
           if (newProducts.length === 0) {
@@ -5483,7 +5918,7 @@ ORDER BY f.followed_at DESC;
           ];
           const insertCartResult = await pool.query(
             insertCartQuery,
-            insertCartQueryValues
+            insertCartQueryValues,
           );
 
           res.status(201).json({
@@ -5530,7 +5965,7 @@ WHERE c.user_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // PATCH Add deliveries
@@ -5574,7 +6009,7 @@ WHERE c.user_email = $1;
 
         // Step 2: Update qty inside JSON in JS
         const updatedInfo = productInfo.map((item) =>
-          item.product_Id === productId ? { ...item, qty: newQty } : item
+          item.product_Id === productId ? { ...item, qty: newQty } : item,
         );
 
         // Step 3: Save updated JSON back to DB
@@ -5616,7 +6051,7 @@ WHERE c.user_email = $1;
 
         // Step 2: Filter out the product to remove
         const updatedInfo = productInfo.filter(
-          (item) => item.product_Id !== productId
+          (item) => item.product_Id !== productId,
         );
 
         // Step 3: যদি সব প্রোডাক্ট বাদ পড়ে যায় → পুরো cart মুছে ফেল
@@ -5661,13 +6096,13 @@ WHERE c.user_email = $1;
         // প্রতিটা কার্টে productinfo আপডেট করা
         for (let cart of carts) {
           let updatedProducts = cart.productinfo.filter(
-            (p) => !ids.includes(p.product_Id)
+            (p) => !ids.includes(p.product_Id),
           );
 
           if (updatedProducts.length === 0) {
             const deleteResult = await pool.query(
               "DELETE FROM carts WHERE cart_id = $1",
-              [cart.cart_id]
+              [cart.cart_id],
             );
             res.status(200).json({
               message: "Products deleted successfully",
@@ -5676,7 +6111,7 @@ WHERE c.user_email = $1;
           } else {
             const updatedResult = await pool.query(
               "UPDATE carts SET productinfo = $1 WHERE cart_id = $2",
-              [JSON.stringify(updatedProducts), cart.cartid]
+              [JSON.stringify(updatedProducts), cart.cartid],
             );
             res.status(200).json({
               message: "Products deleted successfully",
@@ -5731,7 +6166,7 @@ WHERE c.user_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // POST: Create Postal Zone API Route
@@ -5793,7 +6228,7 @@ WHERE c.user_email = $1;
               zone.postal_code,
               zone.latitude,
               zone.longitude,
-              zone.is_remote || false
+              zone.is_remote || false,
             );
             return `($${baseIndex + 1}, $${baseIndex + 2}, $${
               baseIndex + 3
@@ -5844,7 +6279,7 @@ ORDER BY
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
     // PUT: Update Postal Zones API Route
     app.put("/postal-zones/:id", async (req, res) => {
@@ -5942,7 +6377,7 @@ ORDER BY
           // 🔹 যদি sellerId admin হয়, তাহলে bazarigo seller এর postal code নাও
           const adminCheck = await pool.query(
             "SELECT role, postal_code FROM admins WHERE id=$1",
-            [sellerId]
+            [sellerId],
           );
           let sellerPostalCode = null;
 
@@ -5952,7 +6387,7 @@ ORDER BY
               adminCheck.rows[0].role === "moderator"
             ) {
               const bazarigo = await pool.query(
-                "SELECT postal_code FROM admins WHERE email='bazarigo.official@gmail.com'"
+                "SELECT postal_code FROM admins WHERE email='bazarigo.official@gmail.com'",
               );
               sellerPostalCode = bazarigo.rows[0]?.postal_code || "1212"; // default postal code
             } else {
@@ -5961,7 +6396,7 @@ ORDER BY
           } else {
             const sellerCheck = await pool.query(
               "SELECT role, postal_code FROM sellers WHERE id=$1",
-              [sellerId]
+              [sellerId],
             );
 
             sellerPostalCode = sellerCheck.rows[0].postal_code;
@@ -6048,7 +6483,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
         } catch (err) {
           return res.status(500).json({ error: err.message });
         }
-      }
+      },
     );
 
     // ------------ Delivery API Routes End ----------------//
@@ -6072,7 +6507,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
             qty: prod.qty,
             isflashsale: prod.isflashsale,
             sellerid: item.sellerid,
-          }))
+          })),
         );
 
         // ফাংশন: Flash Sale Stock Update
@@ -6080,7 +6515,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
           const now = Math.floor(Date.now() / 1000);
           const flashRes = await client.query(
             `SELECT id, sale_products FROM flashSaleProducts WHERE isactive = true AND start_time <= $1 AND end_time >= $1`,
-            [now]
+            [now],
           );
           if (!flashRes.rows.length) return;
 
@@ -6091,13 +6526,15 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
             if (sp.id !== item.product_id) continue;
             const variantsArr = sp.extras?.variants || [];
             const variantIndex = variantsArr.findIndex((v) =>
-              Object.keys(item.variants).every((k) => v[k] === item.variants[k])
+              Object.keys(item.variants).every(
+                (k) => v[k] === item.variants[k],
+              ),
             );
             if (variantIndex === -1) continue;
 
             variantsArr[variantIndex].stock = Math.max(
               variantsArr[variantIndex].stock - item.qty,
-              0
+              0,
             );
             sp.stock = variantsArr.reduce((sum, v) => sum + (v.stock || 0), 0);
             updated = true;
@@ -6107,7 +6544,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
           if (updated) {
             await client.query(
               `UPDATE flashSaleProducts SET sale_products = $1 WHERE id = $2`,
-              [JSON.stringify(flashSale.sale_products), flashSale.id]
+              [JSON.stringify(flashSale.sale_products), flashSale.id],
             );
           }
         };
@@ -6116,7 +6553,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
         const updateNormalStock = async (item) => {
           const productRes = await client.query(
             `SELECT id, seller_id, product_name, extras FROM products WHERE id = $1`,
-            [item.product_id]
+            [item.product_id],
           );
           if (!productRes.rows.length) return;
 
@@ -6124,13 +6561,13 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
           let variants = extras.variants || [];
 
           const variantIndex = variants.findIndex((v) =>
-            Object.keys(item.variants).every((k) => v[k] === item.variants[k])
+            Object.keys(item.variants).every((k) => v[k] === item.variants[k]),
           );
           if (variantIndex === -1) return;
 
           variants[variantIndex].stock = Math.max(
             variants[variantIndex].stock - item.qty,
-            0
+            0,
           );
           const newStock = variants[variantIndex].stock;
 
@@ -6150,7 +6587,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
                       ? "Product Out of Stock"
                       : "Low Stock Warning",
                   message: `${product_name} (${JSON.stringify(
-                    item.variants
+                    item.variants,
                   )}) ${
                     n.type === "out_of_stock"
                       ? "is now OUT OF STOCK."
@@ -6159,15 +6596,15 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
                   type: n.type,
                   refId: item.product_id,
                   expiresAt: "7d",
-                })
-              )
+                }),
+              ),
             );
           }
 
           const totalStock = variants.reduce((sum, v) => sum + v.stock, 0);
           await client.query(
             `UPDATE products SET extras = $1, stock = $2 WHERE id = $3`,
-            [{ variants }, totalStock, item.product_id]
+            [{ variants }, totalStock, item.product_id],
           );
         };
 
@@ -6176,8 +6613,8 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
           orderdProducts.map((item) =>
             item.isflashsale
               ? updateFlashSaleStock(item)
-              : updateNormalStock(item)
-          )
+              : updateNormalStock(item),
+          ),
         );
 
         // Insert order
@@ -6203,12 +6640,12 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
         if (promoCode) {
           const promoRes = await client.query(
             `SELECT id FROM promotions WHERE code=$1`,
-            [promoCode]
+            [promoCode],
           );
           if (promoRes.rows.length) {
             await client.query(
               `UPDATE user_promotions SET used=true WHERE user_id=$1 AND promo_id=$2`,
-              [userId, promoRes.rows[0].id]
+              [userId, promoRes.rows[0].id],
             );
           }
         }
@@ -6228,7 +6665,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
       WHERE cart_id = $2 AND user_email = $3
       RETURNING productinfo
       `,
-            [productIdsToRemove, item.cart_id, item.user_email]
+            [productIdsToRemove, item.cart_id, item.user_email],
           );
 
           const remainingProducts = updateRes.rows[0]?.productinfo || [];
@@ -6237,7 +6674,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
           if (remainingProducts.length === 0) {
             return await client.query(
               `DELETE FROM carts WHERE cart_id = $1 AND user_email = $2`,
-              [item.cart_id, item.user_email]
+              [item.cart_id, item.user_email],
             );
           }
         });
@@ -6259,7 +6696,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
             paymentPayload.payment_method,
             paymentPayload.payment_status,
             paymentPayload.phoneNumber,
-          ]
+          ],
         );
 
         // Seller notifications
@@ -6271,7 +6708,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
         UNION
         SELECT id,role FROM sellers WHERE id = $1
       `,
-              [item.sellerid]
+              [item.sellerid],
             );
 
             const seller = getSeller.rows[0];
@@ -6284,7 +6721,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
               refId: result.rows[0].order_id,
               expiresAt: "7d",
             });
-          })
+          }),
         );
 
         if (result.rowCount > 0) {
@@ -6312,7 +6749,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
     © ${new Date().getFullYear()} Bazarigo
   </p>
 </div>
-`
+`,
           );
         }
 
@@ -6381,7 +6818,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
                 return `/uploads/returns/videos/${filename}`;
               }
               return null;
-            })
+            }),
           );
 
           // Save uploaded files to WebP
@@ -6430,8 +6867,8 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
                   type: "return_request",
                   refId: orderId,
                   expiresAt: "7d",
-                })
-              )
+                }),
+              ),
             );
 
             return res.status(201).json({
@@ -6442,7 +6879,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
     // ADMIN MIDDLEWARE
     // GET: GET Orders  API Route
@@ -6462,7 +6899,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // GET: GET Orders By Seller ID
@@ -6492,7 +6929,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // GET: GET Orders By Email API Route
@@ -6521,7 +6958,7 @@ WHERE customer_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // GET: GET Orders By Email  API Route (Admin)
@@ -6549,7 +6986,7 @@ WHERE customer_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // Delete: Delete Order Bulk API Route
@@ -6595,7 +7032,7 @@ WHERE customer_email = $1;
           case "Returned": {
             const selectedItem = orderItems.map((item) => {
               const selectProd = item.productinfo.find(
-                (prod) => prod.product_Id === prodId
+                (prod) => prod.product_Id === prodId,
               );
               return {
                 name: selectProd.product_name,
@@ -6627,7 +7064,7 @@ WHERE customer_email = $1;
 
             const returnProduct = await pool.query(
               "SELECT extras,stock FROM products WHERE id=$1",
-              [prodId]
+              [prodId],
             );
             const productRow = returnProduct.rows[0];
             const extras = productRow.extras || {};
@@ -6635,7 +7072,7 @@ WHERE customer_email = $1;
 
             const returnOrderProduct = orderItems.map((item) => {
               const returnProd = item.productinfo.find(
-                (prod) => prod.product_Id === prodId
+                (prod) => prod.product_Id === prodId,
               );
               return {
                 ...returnProd,
@@ -6652,7 +7089,7 @@ WHERE customer_email = $1;
             const updatedOrderItems = orderItems
               .map((item) => {
                 const updatedProds = item.productinfo.filter(
-                  (prod) => prod.product_Id !== prodId
+                  (prod) => prod.product_Id !== prodId,
                 );
                 return { ...item, productinfo: updatedProds };
               })
@@ -6670,7 +7107,7 @@ WHERE customer_email = $1;
 
             const totalStock = updatedVariants.reduce(
               (sum, variant) => sum + (Number(variant.stock) || 0),
-              0
+              0,
             );
 
             await pool.query(
@@ -6686,7 +7123,7 @@ WHERE customer_email = $1;
       stock = $2
     WHERE id = $3
   `,
-              [JSON.stringify(updatedVariants), totalStock, prodId]
+              [JSON.stringify(updatedVariants), totalStock, prodId],
             );
 
             console.log("Update Variant :", returnOrderProduct);
@@ -6721,7 +7158,7 @@ WHERE customer_email = $1;
                   returnReason || "No reason provided",
                   "Returned",
                   id,
-                ]
+                ],
               );
             } else {
               // ➕ Insert new return_order
@@ -6738,7 +7175,7 @@ WHERE customer_email = $1;
                   JSON.stringify([returnOrderProduct]),
                   returnReason || "No reason provided",
                   "Returned",
-                ]
+                ],
               );
             }
 
@@ -6786,7 +7223,7 @@ WHERE customer_email = $1;
           case "Cancelled": {
             const cancelledProduct = await pool.query(
               "SELECT extras,stock FROM products WHERE id=$1",
-              [prodId]
+              [prodId],
             );
             const productRow = cancelledProduct.rows[0];
             const extras = productRow.extras || {};
@@ -6794,7 +7231,7 @@ WHERE customer_email = $1;
 
             const cancelledOrderProduct = orderItems.map((item) => {
               const cancelProd = item.productinfo.find(
-                (prod) => prod.product_Id === prodId
+                (prod) => prod.product_Id === prodId,
               );
               return {
                 ...cancelProd,
@@ -6810,7 +7247,7 @@ WHERE customer_email = $1;
             const updatedOrderItems = orderItems
               .map((item) => {
                 const updatedProds = item.productinfo.filter(
-                  (prod) => prod.product_Id !== prodId
+                  (prod) => prod.product_Id !== prodId,
                 );
                 return { ...item, productinfo: updatedProds };
               })
@@ -6829,7 +7266,7 @@ WHERE customer_email = $1;
 
             const totalStock = updatedVariants.reduce(
               (sum, variant) => sum + (Number(variant.stock) || 0),
-              0
+              0,
             );
 
             await pool.query(
@@ -6845,7 +7282,7 @@ WHERE customer_email = $1;
       stock = $2
     WHERE id = $3
   `,
-              [JSON.stringify(updatedVariants), totalStock, prodId]
+              [JSON.stringify(updatedVariants), totalStock, prodId],
             );
 
             console.log("Update Variant :", cancelledOrderProduct);
@@ -7082,7 +7519,7 @@ WHERE customer_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
     // GET: GET Return Orders By Seller ID
     app.get(
@@ -7111,7 +7548,7 @@ WHERE customer_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
     // GET: Get Return Order API Route
     app.get(
@@ -7130,7 +7567,7 @@ WHERE customer_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
     // GET: Get Return Order By email API Route
     app.get(
@@ -7153,7 +7590,7 @@ WHERE customer_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // DELETE: Delete Return Request By Id  API Route
@@ -7191,7 +7628,7 @@ WHERE customer_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // ------------ Orders API Routes End ----------------//
@@ -7215,7 +7652,7 @@ WHERE customer_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     app.get(
@@ -7235,7 +7672,7 @@ WHERE customer_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     app.get(
@@ -7259,7 +7696,7 @@ WHERE customer_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // PATCH: Update Payment status API Route
@@ -7357,7 +7794,7 @@ WHERE customer_email = $1;
             .status(500)
             .json({ message: "Server error", error: error.message });
         }
-      }
+      },
     );
 
     // ------------ Payments API Routes End----------------//
@@ -7400,7 +7837,7 @@ WHERE customer_email = $1;
         } catch (error) {
           res.status(500).json({ message: error.message });
         }
-      }
+      },
     );
 
     // PATCH: Update Payment status API Route
@@ -7445,7 +7882,7 @@ WHERE customer_email = $1;
         // Check promo validity
         const promoResult = await pool.query(
           "SELECT * FROM promotions WHERE code=$1 AND is_active=true AND CURRENT_DATE BETWEEN start_date AND end_date",
-          [code]
+          [code],
         );
         console.log(promoResult.rows);
 
@@ -7457,7 +7894,7 @@ WHERE customer_email = $1;
         // Check if already used
         const usedCheck = await pool.query(
           "SELECT * FROM user_promotions WHERE user_id=$1 AND promo_id=$2 AND used=true",
-          [userId, promo.id]
+          [userId, promo.id],
         );
         if (usedCheck.rows.length > 0)
           return res.status(400).json({ message: "Already Used Promo!" });
@@ -7465,7 +7902,7 @@ WHERE customer_email = $1;
         // Record promo as unused initially
         await pool.query(
           "INSERT INTO user_promotions (user_id, promo_id, used) VALUES ($1,$2,false) RETURNING *",
-          [userId, promo.id]
+          [userId, promo.id],
         );
 
         res.json({
@@ -7492,13 +7929,13 @@ WHERE customer_email = $1;
        FROM user_promotions up
        JOIN promotions p ON up.promo_id = p.id
        WHERE up.user_id=$1 AND up.used=false`,
-            [userId]
+            [userId],
           );
           res.json({ promo: result.rows[0] || null });
         } catch (err) {
           res.status(500).json({ message: err.message });
         }
-      }
+      },
     );
 
     // Mark Promo as Used (Order Complete)
@@ -7507,7 +7944,7 @@ WHERE customer_email = $1;
         const { userId, promoId } = req.params;
         const result = await pool.query(
           "UPDATE user_promotions SET used=true WHERE user_id=$1 AND promo_id=$2 RETURNING *",
-          [userId, promoId]
+          [userId, promoId],
         );
         if (result.rowCount === 0)
           return res
@@ -7532,7 +7969,7 @@ WHERE customer_email = $1;
             `SELECT id AS user_id, full_name AS name, email, profile_img AS img, role
        FROM admins
        WHERE role = 'super admin' AND email='bazarigo.official@gmail.com'
-       LIMIT 1`
+       LIMIT 1`,
           );
           if (!result.rows.length) {
             return res
@@ -7544,12 +7981,12 @@ WHERE customer_email = $1;
           console.error(err);
           res.status(500).json({ success: false, message: "Server error" });
         }
-      }
+      },
     );
 
     // Send message
 
-    app.post("/send", async (req, res) => {
+    app.post("/send", upload.single("image"), async (req, res) => {
       let { sender_id, sender_role, receiver_id, receiver_role } = req.body;
       let content = req.body.content; // undefined হলে খালি string
       const id = uuidv4();
@@ -7595,11 +8032,35 @@ WHERE customer_email = $1;
           receiver_id,
         ]);
 
+        let savedPath = null;
+        if (req.file) {
+          const safeName = "Message".replace(/\s+/g, "_");
+          const uploadDir = path.join(__dirname, "uploads", "messages");
+          if (!fs.existsSync(uploadDir))
+            fs.mkdirSync(uploadDir, { recursive: true });
+
+          const filename = `${safeName}-${Date.now()}.webp`;
+          const filepath = path.join(uploadDir, filename);
+
+          await sharp(req.file.buffer)
+            .webp({ lossless: true })
+            .toFile(filepath);
+          savedPath = `/uploads/messages/${filename}`;
+        }
+
         // মূল message insert
         const result = await pool.query(
-          `INSERT INTO messages (id, sender_id, sender_role, receiver_id, receiver_role, content)
-           VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-          [id, sender_id, sender_role, receiver_id, receiver_role, content]
+          `INSERT INTO messages (id, sender_id, sender_role, receiver_id, receiver_role, content, image_url)
+           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+          [
+            id,
+            sender_id,
+            sender_role,
+            receiver_id,
+            receiver_role,
+            content,
+            savedPath,
+          ],
         );
         if (result.rowCount > 0) {
           if (sender_role === "customer") {
@@ -7618,7 +8079,7 @@ WHERE customer_email = $1;
                   sender_id,
                   sender_role,
                   autoContent,
-                ]
+                ],
               );
             }
           }
@@ -7635,6 +8096,7 @@ WHERE customer_email = $1;
 
         res.status(200).json({ success: true, message: result.rows[0] });
       } catch (err) {
+        console.log(err);
         res.status(500).json({ success: false, error: err.message });
       }
     });
@@ -7654,7 +8116,7 @@ WHERE customer_email = $1;
             `UPDATE messages
        SET read_status = true
        WHERE sender_id = $1 AND receiver_id = $2`,
-            [otherUserId, loggedInUserId]
+            [otherUserId, loggedInUserId],
           );
 
           const result = await pool.query(
@@ -7673,14 +8135,14 @@ WHERE customer_email = $1;
        WHERE (m.sender_id = $1 AND m.receiver_id = $2)
           OR (m.sender_id = $2 AND m.receiver_id = $1)
        ORDER BY m.created_at ASC`,
-            [loggedInUserId, otherUserId]
+            [loggedInUserId, otherUserId],
           );
 
           res.status(200).json({ success: true, messages: result.rows });
         } catch (err) {
           res.status(500).json({ success: false, error: err.message });
         }
-      }
+      },
     );
 
     app.get(
@@ -7745,7 +8207,7 @@ ORDER BY lm.created_at DESC;
         } catch (err) {
           res.status(500).json({ success: false, error: err.message });
         }
-      }
+      },
     );
 
     app.get(
@@ -7762,7 +8224,7 @@ ORDER BY lm.created_at DESC;
         } catch (err) {
           res.status(500).json({ success: false, error: err.message });
         }
-      }
+      },
     );
 
     // ------------ Message API Routes End---------//
@@ -7879,7 +8341,7 @@ ORDER BY lm.created_at DESC;
         } catch (error) {
           res.status(500).json({ message: "Server error" });
         }
-      }
+      },
     );
 
     app.delete("/admins/:id", async (req, res) => {
@@ -7946,7 +8408,7 @@ ORDER BY lm.created_at DESC;
           // Check exists
           const { rows } = await pool.query(
             "SELECT * FROM admins WHERE id=$1",
-            [adminId]
+            [adminId],
           );
           if (rows.length === 0)
             return res.status(404).json({ message: "Admin not found" });
@@ -7975,13 +8437,13 @@ ORDER BY lm.created_at DESC;
           const profile_imgPath = await saveMulterImage(
             files?.profileImg?.[0],
             "profile",
-            payload.full_name || oldAdmin.full_name
+            payload.full_name || oldAdmin.full_name,
           );
 
           const store_imgPath = await saveMulterImage(
             files?.storeImg?.[0],
             "store",
-            payload.store_name || oldAdmin.store_name
+            payload.store_name || oldAdmin.store_name,
           );
 
           // Password hash handle
@@ -7990,7 +8452,7 @@ ORDER BY lm.created_at DESC;
           if (payload.old_password && payload.new_password) {
             const match = await bcrypt.compare(
               payload.old_password,
-              oldAdmin.password
+              oldAdmin.password,
             );
             if (!match) {
               return res
@@ -8055,7 +8517,7 @@ ORDER BY lm.created_at DESC;
             .status(500)
             .json({ message: "Internal server error", err: error.message });
         }
-      }
+      },
     );
 
     // ------------ Admin API Routes End---------//
@@ -8194,7 +8656,7 @@ ORDER BY lsd.day ASC;
           console.error("Dashboard error:", err);
           res.status(500).json({ message: "Internal server error" });
         }
-      }
+      },
     );
 
     app.get(
@@ -8224,6 +8686,7 @@ ORDER BY lsd.day ASC;
           // -------------------- INITIAL METRICS --------------------
           let totalOrders = orders.length;
           let revenue = 0;
+          let deliveryRevenue = 0;
 
           const customerSet = new Set();
           const sellerMap = new Map();
@@ -8235,7 +8698,7 @@ ORDER BY lsd.day ASC;
           // -------------------- INIT DATE MAP --------------------
           if (interval === "weekly") {
             ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].forEach((day) =>
-              ordersByDayMap.set(day, 0)
+              ordersByDayMap.set(day, 0),
             );
           } else if (interval === "monthly") {
             for (let i = 1; i <= 31; i++) ordersByDayMap.set(i, 0);
@@ -8261,6 +8724,7 @@ ORDER BY lsd.day ASC;
             if (!order) continue;
 
             customerSet.add(order.customer_email);
+            deliveryRevenue += Number(order.delivery_cost || 0);
 
             const orderDate = new Date(order.order_date);
             if (isNaN(orderDate)) continue;
@@ -8314,11 +8778,13 @@ ORDER BY lsd.day ASC;
                 const sellerEarnings = amount - commissionAmount;
 
                 revenue += amount;
+                grossRevenue = revenue + deliveryRevenue;
+                productRevenue = revenue;
 
                 // Category
                 categoryMap.set(
                   category,
-                  (categoryMap.get(category) || 0) + qty
+                  (categoryMap.get(category) || 0) + qty,
                 );
 
                 // Seller update
@@ -8374,7 +8840,7 @@ ORDER BY lsd.day ASC;
             ([label, value]) => ({
               label,
               value,
-            })
+            }),
           );
 
           const sellerPerformance = Array.from(sellerMap.values()).map((s) => ({
@@ -8390,11 +8856,11 @@ ORDER BY lsd.day ASC;
             ([label, value]) => ({
               label,
               value,
-            })
+            }),
           );
 
           const productCommissionData = Array.from(
-            productCommissionMap.values()
+            productCommissionMap.values(),
           );
           const sellerCommissionData = Array.from(sellerMap.values());
 
@@ -8402,7 +8868,9 @@ ORDER BY lsd.day ASC;
             reportType: interval,
             totalOrders,
             orders,
-            revenue,
+            grossRevenue,
+            productRevenue,
+            deliveryRevenue,
             totalCustomers,
             totalSellers,
             averageOrderValue,
@@ -8419,7 +8887,7 @@ ORDER BY lsd.day ASC;
             .status(500)
             .json({ message: "Server error fetching reports" });
         }
-      }
+      },
     );
 
     app.get(
@@ -8439,7 +8907,7 @@ ORDER BY lsd.day ASC;
             `SELECT id, product_name, stock,category,subcategory 
        FROM products 
        WHERE seller_id = $1`,
-            [sellerId]
+            [sellerId],
           );
 
           // -----------------------------
@@ -8449,7 +8917,7 @@ ORDER BY lsd.day ASC;
             `SELECT id, full_name, email, store_name, img, district, thana 
        FROM sellers
        WHERE id = $1`,
-            [sellerId]
+            [sellerId],
           );
 
           // -----------------------------
@@ -8463,7 +8931,7 @@ ORDER BY lsd.day ASC;
           WHERE item->>'sellerid' = $1
        )
        ORDER BY order_date DESC`,
-            [sellerId]
+            [sellerId],
           );
 
           // -----------------------------
@@ -8516,7 +8984,7 @@ ORDER BY lsd.day ASC;
        )
        ORDER BY order_date DESC
        LIMIT 6`,
-            [sellerId]
+            [sellerId],
           );
 
           // -----------------------------
@@ -8589,7 +9057,7 @@ ORDER BY d.date ASC;
             `SELECT COUNT(*) AS follower_count
        FROM following 
        WHERE seller_id = $1`,
-            [sellerId]
+            [sellerId],
           );
 
           // =============================
@@ -8616,7 +9084,7 @@ ORDER BY d.date ASC;
           console.error("Dashboard error:", error);
           res.status(500).json({ success: false, message: "Server Error" });
         }
-      }
+      },
     );
 
     // ------------Seller DashBoard End--------------//
@@ -8690,7 +9158,7 @@ ORDER BY d.date ASC;
               label = `Week ${week} ${orderDate.getFullYear()}`;
             } else {
               key = `${orderDate.getFullYear()}-${String(
-                orderDate.getMonth() + 1
+                orderDate.getMonth() + 1,
               ).padStart(2, "0")}`;
               label = orderDate.toLocaleString("default", {
                 month: "short",
@@ -8720,7 +9188,7 @@ ORDER BY d.date ASC;
                 if (!categoryMap.has(category)) categoryMap.set(category, 0);
                 categoryMap.set(
                   category,
-                  categoryMap.get(category) + sellerEarnings
+                  categoryMap.get(category) + sellerEarnings,
                 );
 
                 // Top products (combine same products)
@@ -8757,6 +9225,7 @@ ORDER BY d.date ASC;
                     commissionRate,
                     commissionAmount,
                     sellerEarnings,
+                    amount: price * qty,
                   };
                 } else {
                   groupedProducts[prod.product_name].quantity += qty;
@@ -8782,12 +9251,12 @@ ORDER BY d.date ASC;
               acc.totalEarnings += p.sellerEarnings;
               return acc;
             },
-            { totalSales: 0, totalCommission: 0, totalEarnings: 0 }
+            { totalSales: 0, totalCommission: 0, totalEarnings: 0 },
           );
 
           return res.json({
             revenueByInterval: Array.from(revenueMap.values()).sort((a, b) =>
-              a.key.localeCompare(b.key)
+              a.key.localeCompare(b.key),
             ),
             categorySales: Array.from(categoryMap.entries()).map(
               ([name, value], i) => ({
@@ -8796,7 +9265,7 @@ ORDER BY d.date ASC;
                 color: ["#4F46E5", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"][
                   i % 5
                 ],
-              })
+              }),
             ),
             topProducts,
             productCommissionData,
@@ -8813,7 +9282,7 @@ ORDER BY d.date ASC;
             .status(500)
             .json({ message: "Server error fetching reports" });
         }
-      }
+      },
     );
 
     // GET: User Notifications
@@ -8842,7 +9311,7 @@ ORDER BY d.date ASC;
         } catch (err) {
           res.status(500).json({ message: err.message });
         }
-      }
+      },
     );
 
     // PATCH: Mark Notification as read
@@ -8879,7 +9348,7 @@ ORDER BY d.date ASC;
         } catch (err) {
           res.status(500).json({ message: err.message });
         }
-      }
+      },
     );
     app.patch(
       "/notifications/read-all",
@@ -8910,7 +9379,7 @@ ORDER BY d.date ASC;
         } catch (err) {
           res.status(500).json({ message: err.message });
         }
-      }
+      },
     );
 
     // Contact Us Api Route

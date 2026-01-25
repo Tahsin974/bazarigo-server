@@ -305,6 +305,7 @@ if (!fs.existsSync(UNUSED_BACKUP_DIR)) {
 const IMAGE_COLUMNS = [
   { table: "banner", column: "image" },
   { table: "products", column: "images" },
+  { table: "products", column: "thumbnail" },
   { table: "sellers", column: "img" },
   { table: "sellers", column: "nid_front_file" },
   { table: "sellers", column: "nid_back_file" },
@@ -472,7 +473,7 @@ async function run() {
         const query = `
       
       UPDATE products p
-      SET istrending = true
+      SET istrending = $1
       FROM (
           SELECT (prod->>'product_Id') AS product_id, SUM((prod->>'qty')::int) AS sold
           FROM orders o
@@ -512,7 +513,37 @@ async function run() {
       );
     `;
 
-        await pool.query(query);
+        const result = await pool.query(query, [true]);
+        if (result.rowCount > 0) {
+          await sendEmail(
+            process.env.SUPER_ADMIN,
+            `Trending Products Update: System Sync Completed`,
+            `
+  <div style="font-family:Arial; max-width:600px; margin:auto; background:#fff; padding:20px; border-radius:10px;">
+    <h2 style="color:#FF0055;">Trending Products Updated</h2>
+
+    <p>
+      The system has successfully analyzed recent user activity and updated the
+      list of trending products.
+    </p>
+
+    <p>
+      <strong>Total trending products identified:</strong> ${result.rowCount}
+    </p>
+
+    <p>
+      These products are now prioritized for visibility across the platform
+      (homepage, search results, and promotional sections).
+    </p>
+
+    <p style="font-size:13px; color:#666; margin-top:20px;">
+      Cron Job executed on:<br/>
+      ${new Date().toLocaleString()}
+    </p>
+  </div>
+  `,
+          );
+        }
       } catch (error) {
         console.error("Error updating trending products:", error);
       }
@@ -916,6 +947,7 @@ GROUP BY c.cart_id, u.id, u.role;
           { header: "subcategory_item", key: "subcategory_item", width: 30 },
           { header: "description", key: "description", width: 30 },
           { header: "images", key: "images", width: 30 },
+          { header: "thumbnail", key: "thumbnail", width: 30 },
           { header: "extras", key: "extras", width: 50 },
         ];
 
@@ -938,6 +970,7 @@ GROUP BY c.cart_id, u.id, u.role;
           subcategory_item: "(enter sub category item)",
           description: "(enter product description)",
           images: "(upload product image manually)",
+          thumbnail: "(upload thumbnail image manually)",
           extras: JSON.stringify({
             variants: [
               {
@@ -985,6 +1018,7 @@ GROUP BY c.cart_id, u.id, u.role;
           subcategory_item: "Dresses",
           description: "This is an example description of the product.",
           images: "image1.jpg, image2.jpg",
+          thumbnail: "thumbnail.jpg",
           extras: JSON.stringify({
             variants: [
               {
@@ -1192,7 +1226,8 @@ GROUP BY c.cart_id, u.id, u.role;
        subcategory, 
        subcategory_item,
        sale_price AS price, 
-       images, 
+       thumbnail, 
+       images,
        'product' AS type
 FROM products
 WHERE product_name ILIKE $1
@@ -1391,7 +1426,10 @@ ORDER BY sold DESC;
     app.post(
       "/products",
       passport.authenticate("jwt", { session: false }),
-      upload.array("images"), // images + videos mixed
+      upload.fields([
+        { name: "thumbnail", maxCount: 1 },
+        { name: "images", maxCount: 10 },
+      ]),
       async (req, res) => {
         try {
           const {
@@ -1443,22 +1481,15 @@ ORDER BY sold DESC;
               "span",
               "div",
             ]),
-
             allowedAttributes: {
               ...sanitizeHtml.defaults.allowedAttributes,
-
-              // 👇 VERY IMPORTANT for Quill
               ul: ["class", "style"],
               ol: ["class", "style", "type"],
               li: ["class", "style", "data-list"],
-
               span: ["class", "style"],
               div: ["class", "style"],
-
               img: ["src", "alt", "width", "height"],
             },
-
-            // 👇 allow inline styles (safe list)
             allowedStyles: {
               "*": {
                 color: [/^.*$/],
@@ -1475,45 +1506,63 @@ ORDER BY sold DESC;
           const uploadDirs = {
             image: path.join(__dirname, "uploads", "products", "images"),
             video: path.join(__dirname, "uploads", "products", "videos"),
+            thumbnail: path.join(
+              __dirname,
+              "uploads",
+              "products",
+              "thumbnails",
+            ),
           };
 
-          // Create directories if not exist
           for (const dir of Object.values(uploadDirs)) {
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
           }
 
-          const savedPaths = await Promise.all(
-            req.files.map(async (file, i) => {
+          // Thumbnail
+          let thumbnailPath = null;
+          if (req.files.thumbnail && req.files.thumbnail.length > 0) {
+            const thumbFile = req.files.thumbnail[0];
+            const thumbName = `${productName}-${productId}-thumb.webp`;
+            const thumbPath = path.join(uploadDirs.thumbnail, thumbName);
+            await sharp(thumbFile.buffer)
+              .webp({ lossless: true })
+              .toFile(thumbPath);
+            thumbnailPath = `/uploads/products/thumbnails/${thumbName}`;
+          }
+
+          // Images & Videos
+          const savedPaths = [];
+          if (req.files.images) {
+            for (let i = 0; i < req.files.images.length; i++) {
+              const file = req.files.images[i];
               const mime = file.mimetype;
 
               if (mime.startsWith("image")) {
-                const filename = `${productName}-${productId}.webp`;
+                const filename = `${productName}-${productId}-${i}.webp`;
                 const filepath = path.join(uploadDirs.image, filename);
                 await sharp(file.buffer)
                   .webp({ lossless: true })
                   .toFile(filepath);
-                return `/uploads/products/images/${filename}`;
+                savedPaths.push(`/uploads/products/images/${filename}`);
               } else if (mime.startsWith("video")) {
                 const ext = mime.split("/")[1];
                 const filename = `${productName}-${i}.${ext}`;
                 const filepath = path.join(uploadDirs.video, filename);
                 await fs.promises.writeFile(filepath, file.buffer);
-                return `/uploads/products/videos/${filename}`;
+                savedPaths.push(`/uploads/products/videos/${filename}`);
               }
-              return null;
-            }),
-          );
-
+            }
+          }
           const query = `
         INSERT INTO products (
           id, product_name, regular_price, sale_price, discount, rating,
           isBestSeller, isHot, isNew, isTrending, isLimitedStock, isExclusive, isFlashSale,
           category, subcategory, description, stock, brand, weight, images, extras,
-          createdAt, updatedAt, seller_id, seller_name, seller_store_name, reviews, seller_role,subcategory_item
+          createdAt, updatedAt, seller_id, seller_name, seller_store_name, reviews, seller_role,subcategory_item,thumbnail
         ) VALUES (
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
           $14,$15,$16,$17,$18,$19,$20,$21,NOW(),
-          $22,$23,$24,$25,$26,$27,$28
+          $22,$23,$24,$25,$26,$27,$28,$29
         ) RETURNING *;
       `;
 
@@ -1546,6 +1595,7 @@ ORDER BY sold DESC;
             [],
             sellerRole || "",
             subcategory_item,
+            thumbnailPath,
           ];
 
           const result = await pool.query(query, values);
@@ -1559,6 +1609,7 @@ ORDER BY sold DESC;
         }
       },
     );
+
     //POST: Bulk Product Upload API Route
     app.post(
       "/products/bulk",
@@ -1742,10 +1793,14 @@ ORDER BY sold DESC;
     );
 
     // PUT : Update Product By ID
+
     app.put(
       "/products/:id",
       passport.authenticate("jwt", { session: false }),
-      upload.array("images"), // multer middleware
+      upload.fields([
+        { name: "thumbnail", maxCount: 1 },
+        { name: "images", maxCount: 10 },
+      ]), // multer middleware
       async (req, res) => {
         try {
           const productId = req.params.id;
@@ -1774,6 +1829,12 @@ ORDER BY sold DESC;
           const uploadDirs = {
             image: path.join(__dirname, "uploads", "products", "images"),
             video: path.join(__dirname, "uploads", "products", "videos"),
+            thumbnail: path.join(
+              __dirname,
+              "uploads",
+              "products",
+              "thumbnails",
+            ),
           };
 
           // create directories if not exist
@@ -1787,7 +1848,7 @@ ORDER BY sold DESC;
 
           // নতুন upload হওয়া ফাইলগুলো process
           const newPaths = await Promise.all(
-            (req.files || []).map(async (file, index) => {
+            (req.files.images || []).map(async (file, index) => {
               const mime = file.mimetype;
 
               if (mime.startsWith("image")) {
@@ -1816,7 +1877,20 @@ ORDER BY sold DESC;
           );
 
           // merge old + new
-          const savedPaths = [...existingPaths, ...newPaths].filter(Boolean);
+          const savedPaths = [...newPaths, ...existingPaths].filter(Boolean);
+
+          // process thumbnail
+          let thumbnailPath = null;
+          if (req.files.thumbnail && req.files.thumbnail.length > 0) {
+            const thumbFile = req.files.thumbnail[0];
+            const thumbName = `${productId}-thumb-${Date.now()}.webp`;
+            const thumbPath = path.join(uploadDirs.thumbnail, thumbName);
+
+            await sharp(thumbFile.buffer)
+              .webp({ lossless: true })
+              .toFile(thumbPath);
+            thumbnailPath = `/uploads/products/thumbnails/${thumbName}`;
+          }
 
           const sanitizedDescription = sanitizeHtml(description, {
             allowedTags: sanitizeHtml.defaults.allowedTags.concat([
@@ -1858,8 +1932,9 @@ ORDER BY sold DESC;
               isBestSeller=$6, isHot=$7, isNew=$8, isTrending=$9, isLimitedStock=$10, isExclusive=$11, isFlashSale=$12,
               category=$13, subcategory=$14, description=$15, stock=$16, brand=$17, images=$18, extras=$19,
               subcategory_item=$20,
+              thumbnail=$21,
               updatedAt=NOW()
-            WHERE id=$21;
+            WHERE id=$22;
           `;
           const values = [
             productName,
@@ -1882,6 +1957,7 @@ ORDER BY sold DESC;
             savedPaths,
             extras ? extras : {},
             subcategory_item,
+            thumbnailPath, // new thumbnail
             productId,
           ];
 
@@ -1890,7 +1966,6 @@ ORDER BY sold DESC;
           res.status(200).json({
             message: `Product updated successfully for ID: ${productId}`,
             updatedCount: result.rowCount,
-            paths: savedPaths,
           });
         } catch (err) {
           console.error(err);
@@ -2301,7 +2376,7 @@ ORDER BY sold DESC;
         CROSS JOIN LATERAL jsonb_array_elements(o.order_items) AS item
         CROSS JOIN LATERAL jsonb_array_elements(item->'productinfo') AS prod
         WHERE (prod->>'product_Id') = p.id
-          AND p.istrending = true
+          AND p.istrending = $1
         GROUP BY p.id
         HAVING SUM((prod->>'qty')::int) >= 5
            AND (
@@ -2316,7 +2391,7 @@ ORDER BY sold DESC;
 
                 `;
 
-        const result = await pool.query(query);
+        const result = await pool.query(query, [true]);
 
         return res.status(200).json({
           message: "Trending Products route is working!",
@@ -4149,6 +4224,20 @@ ORDER BY stock ASC;
           ];
 
           const result = await pool.query(query, values);
+          if (result.rowCount > 0) {
+            // Update seller store name in products table
+            const updateProductsQuery = `
+              UPDATE products
+              SET seller_store_name = $1,
+              seller_name = $2
+              WHERE seller_id = $3;
+            `;
+            await pool.query(updateProductsQuery, [
+              payload.store_name || oldSeller.store_name,
+              payload.full_name || oldSeller.full_name,
+              sellerId,
+            ]);
+          }
 
           return res.status(200).json({
             message: "Seller updated successfully",
@@ -7884,7 +7973,7 @@ WHERE customer_email = $1;
           "SELECT * FROM promotions WHERE code=$1 AND is_active=true AND CURRENT_DATE BETWEEN start_date AND end_date",
           [code],
         );
-        console.log(promoResult.rows);
+        console.log(code);
 
         if (promoResult.rows.length === 0)
           return res.status(400).json({ message: "Invalid  promo" });
@@ -8506,6 +8595,20 @@ ORDER BY lm.created_at DESC;
           ];
 
           const result = await pool.query(query, values);
+          if (result.rowCount > 0) {
+            // Update seller store name in products table
+            const updateProductsQuery = `
+              UPDATE products
+              SET seller_store_name = $1,
+              seller_name = $2
+              WHERE seller_id = $3;
+            `;
+            await pool.query(updateProductsQuery, [
+              payload.store_name || oldAdmin.store_name,
+              payload.full_name || oldAdmin.full_name,
+              adminId,
+            ]);
+          }
 
           return res.status(200).json({
             message: "Admin updated successfully",

@@ -30,6 +30,7 @@ CREATE TABLE products (
     stock INT DEFAULT 0,
     brand VARCHAR(100),
     weight INT DEFAULT 1,
+    thumbnail TEXT,
     images TEXT[],
     extras JSONB,
     reviews JSONB[] DEFAULT '{}',

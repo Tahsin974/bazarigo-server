@@ -466,12 +466,12 @@ async function run() {
     });
 
     // 05:00 AM Sunday - Update Trending Products
+    // "0 5 * * 0"
 
     cron.schedule("0 5 * * 0", async () => {
       try {
-        // Update trending products
-        const query = `
-      
+        // First: set trending = true for qualifying products
+        const updateTrendingQuery = `
       UPDATE products p
       SET istrending = $1
       FROM (
@@ -491,10 +491,14 @@ async function run() {
                 FROM unnest(p.reviews) AS r
             ), 0) >= 4
         );
+    `;
 
-      -- Set trending = false for products not meeting criteria
+        const result1 = await pool.query(updateTrendingQuery, [true]);
+
+        // Second: set trending = false for other products
+        const updateNotTrendingQuery = `
       UPDATE products
-      SET istrending = false
+      SET istrending = $1
       WHERE id NOT IN (
           SELECT (prod->>'product_Id')
           FROM orders o
@@ -513,38 +517,41 @@ async function run() {
       );
     `;
 
-        const result = await pool.query(query, [true]);
-        if (result.rowCount > 0) {
+        await pool.query(updateNotTrendingQuery, [false]);
+
+        // Send email only if trending products updated
+        if (result1.rowCount > 0) {
           await sendEmail(
             process.env.SUPER_ADMIN,
             `Trending Products Update: System Sync Completed`,
             `
-  <div style="font-family:Arial; max-width:600px; margin:auto; background:#fff; padding:20px; border-radius:10px;">
-    <h2 style="color:#FF0055;">Trending Products Updated</h2>
+        <div style="font-family:Arial; max-width:600px; margin:auto; background:#fff; padding:20px; border-radius:10px;">
+          <h2 style="color:#FF0055;">Trending Products Updated</h2>
 
-    <p>
-      The system has successfully analyzed recent user activity and updated the
-      list of trending products.
-    </p>
+          <p>
+            The system has successfully analyzed recent user activity and updated the
+            list of trending products.
+          </p>
 
-    <p>
-      <strong>Total trending products identified:</strong> ${result.rowCount}
-    </p>
+          <p>
+            <strong>Total trending products identified:</strong> ${result1.rowCount}
+          </p>
 
-    <p>
-      These products are now prioritized for visibility across the platform
-      (homepage, search results, and promotional sections).
-    </p>
+          <p>
+            These products are now prioritized for visibility across the platform
+            (homepage, search results, and promotional sections).
+          </p>
 
-    <p style="font-size:13px; color:#666; margin-top:20px;">
-      Cron Job executed on:<br/>
-      ${new Date().toLocaleString()}
-    </p>
-  </div>
-  `,
+          <p style="font-size:13px; color:#666; margin-top:20px;">
+            Cron Job executed on:<br/>
+            ${new Date().toLocaleString()}
+          </p>
+        </div>
+        `,
           );
         }
       } catch (error) {
+        console.log("Cron error:", error.message);
         console.error("Error updating trending products:", error);
       }
     });
@@ -1386,6 +1393,78 @@ ORDER BY sold DESC;
         }
       },
     );
+    // GET: Share Product API Route
+    app.get("/share/product/:id", async (req, res) => {
+      try {
+        const productId = req.params.id;
+        const encodedId = Buffer.from(productId.toString()).toString("base64");
+
+        const query = `SELECT product_name, description, thumbnail FROM products WHERE id = $1`;
+        const result = await pool.query(query, [productId]);
+
+        if (!result.rows.length) {
+          return res.status(404).send("Product not found");
+        }
+
+        const product = result.rows[0];
+        const cleanDescription = product.description
+          ? product.description
+              .replace(/<[^>]*>/g, "")
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 120) + "..."
+          : "Check out this product!";
+
+        const imageUrl = product.thumbnail
+          ? `${process.env.URL}${product.thumbnail}`
+          : "";
+
+        // চেক করা হচ্ছে এটি ফেসবুক বট কি না
+        const userAgent = req.headers["user-agent"] || "";
+        const isSocialBot =
+          /facebookexternalhit|Facebot|Twitterbot|WhatsApp/.test(userAgent);
+
+        res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>${product.product_name}</title>
+  
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="${product.product_name}" />
+  <meta property="og:description" content="${cleanDescription}" />
+  <meta property="og:url" content="${process.env.BASEURL}/product/${encodedId}" />
+  <meta property="og:image" content="${imageUrl}" />
+  <meta property="og:image:secure_url" content="${imageUrl}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="${imageUrl}" />
+
+  ${!isSocialBot ? `<meta http-equiv="refresh" content="0; url=${process.env.BASEURL}/product/${encodedId}" />` : ""}
+</head>
+<body>
+  <div style="text-align: center; margin-top: 50px;">
+    <p>Loading product...</p>
+    <script>
+      // যদি মেটা রিফ্রেশ কাজ না করে, তবে জাভাস্ক্রিপ্ট দিয়ে রিডাইরেক্ট হবে (বটদের জন্য নয়)
+      if (!${isSocialBot}) {
+        setTimeout(() => {
+          window.location.href = "${process.env.BASEURL}/product/${encodedId}";
+        }, 500);
+      }
+    </script>
+  </div>
+</body>
+</html>
+`);
+      } catch (err) {
+        console.error("Share product error:", err);
+        res.status(500).send("Server error");
+      }
+    });
 
     //GET: Get Products By SellerId API Route
     app.get(
@@ -1395,7 +1474,6 @@ ORDER BY sold DESC;
         try {
           const { sellerId } = req.params;
 
-          // const query = "SELECT * FROM products WHERE seller_id =$1;";
           const query = `SELECT
           p.*,
          COALESCE(SUM((pi->>'qty')::INT)::INT, 0) AS sold
@@ -1824,6 +1902,7 @@ ORDER BY sold DESC;
             stock,
             brand,
             extras,
+            existingThumbnail,
           } = req.body;
 
           const uploadDirs = {
@@ -1879,8 +1958,9 @@ ORDER BY sold DESC;
           // merge old + new
           const savedPaths = [...newPaths, ...existingPaths].filter(Boolean);
 
-          // process thumbnail
-          let thumbnailPath = null;
+          // ✅ thumbnail handling (FIXED)
+          let thumbnailPath = existingThumbnail || null;
+
           if (req.files.thumbnail && req.files.thumbnail.length > 0) {
             const thumbFile = req.files.thumbnail[0];
             const thumbName = `${productId}-thumb-${Date.now()}.webp`;
@@ -1889,7 +1969,14 @@ ORDER BY sold DESC;
             await sharp(thumbFile.buffer)
               .webp({ lossless: true })
               .toFile(thumbPath);
+
             thumbnailPath = `/uploads/products/thumbnails/${thumbName}`;
+
+            // optional: delete old thumbnail
+            if (existingThumbnail) {
+              const oldPath = path.join(__dirname, existingThumbnail);
+              if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+            }
           }
 
           const sanitizedDescription = sanitizeHtml(description, {
@@ -2327,6 +2414,7 @@ ORDER BY sold DESC;
     p.isbestseller,
     p.isnew,
     p.images,
+    p.thumbnail,
     p.reviews,
     COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
   FROM products p
@@ -2366,6 +2454,7 @@ ORDER BY sold DESC;
             p.discount,
             p.rating,
             p.images,
+            p.thumbnail,
             p.isBestSeller,
             p.isNew,
             p.reviews,
@@ -2418,6 +2507,7 @@ ORDER BY sold DESC;
     p.isbestseller,
     p.isnew,
     p.images,
+    p.thumbnail,
     p.reviews,
     COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
   FROM products p
@@ -2459,6 +2549,7 @@ ORDER BY sold DESC;
     p.isbestseller,
     p.isnew,
     p.images,
+    p.thumbnail,
     p.reviews,
     COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
   FROM products p
@@ -2500,6 +2591,7 @@ ORDER BY sold DESC;
     p.isbestseller,
     p.isnew,
     p.images,
+    p.thumbnail,
     p.reviews,
     COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
   FROM products p
@@ -2541,6 +2633,7 @@ ORDER BY sold DESC;
     p.isbestseller,
     p.isnew,
     p.images,
+    p.thumbnail,
     p.reviews,
     COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
   FROM products p
@@ -2582,6 +2675,7 @@ ORDER BY sold DESC;
     p.isbestseller,
     p.isnew,
     p.images,
+    p.thumbnail,
     p.reviews,
     COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
   FROM products p
@@ -2623,6 +2717,7 @@ ORDER BY sold DESC;
     p.isbestseller,
     p.isnew,
     p.images,
+    p.thumbnail,
     p.reviews,
     COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
   FROM products p
@@ -2664,6 +2759,7 @@ ORDER BY sold DESC;
     p.isbestseller,
     p.isnew,
     p.images,
+    p.thumbnail,
     p.reviews,
     COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
   FROM products p
@@ -2705,6 +2801,7 @@ ORDER BY sold DESC;
     p.isbestseller,
     p.isnew,
     p.images,
+    p.thumbnail,
     p.reviews,
     COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
   FROM products p
@@ -2746,6 +2843,7 @@ ORDER BY sold DESC;
     p.isbestseller,
     p.isnew,
     p.images,
+    p.thumbnail,
     p.reviews,
     COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
   FROM products p
@@ -4449,52 +4547,52 @@ ORDER BY stock ASC;
           { expiresIn: "7d" },
         );
 
-        // res
-        //   .clearCookie("Token", {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     path: "/",
-        //     maxAge: 0,
-        //   })
-        //   .clearCookie("RefreshToken", {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     path: "/",
-        //     maxAge: 0,
-        //   });
+        res
+          .clearCookie("Token", {
+            httpOnly: true,
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
+            path: "/",
+            maxAge: 0,
+          })
+          .clearCookie("RefreshToken", {
+            httpOnly: true,
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
+            path: "/",
+            maxAge: 0,
+          });
 
-        // res.cookie("Token", newAccessToken, {
-        //   httpOnly: true,
-        //   secure: true,
-        //   sameSite: "None",
-        //   domain: ".bazarigo.com",
-        //   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        // });
-
-        // Clear old cookies
-        res.clearCookie("Token", {
-          httpOnly: true,
-          sameSite: "Strict",
-          maxAge: 0,
-        });
-
-        res.clearCookie("RefreshToken", {
-          httpOnly: true,
-          sameSite: "Strict",
-          maxAge: 0,
-        });
-
-        // Set new access token
         res.cookie("Token", newAccessToken, {
           httpOnly: true,
-          secure: false,
-          sameSite: "Strict",
+          secure: true,
+          sameSite: "None",
+          domain: ".bazarigo.com",
           maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         });
+
+        // Clear old cookies
+        // res.clearCookie("Token", {
+        //   httpOnly: true,
+        //   sameSite: "Strict",
+        //   maxAge: 0,
+        // });
+
+        // res.clearCookie("RefreshToken", {
+        //   httpOnly: true,
+        //   sameSite: "Strict",
+        //   maxAge: 0,
+        // });
+
+        // // Set new access token
+        // res.cookie("Token", newAccessToken, {
+        //   httpOnly: true,
+        //   secure: false,
+        //   sameSite: "Strict",
+        //   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        // });
 
         res.json({ message: "Access token refreshed" });
       } catch (err) {
@@ -4533,38 +4631,38 @@ ORDER BY stock ASC;
           },
         );
 
-        // res
-        //   .cookie("Token", accessToken, {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        //   })
-        //   .cookie("RefreshToken", refreshToken, {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-        //   })
-        //   .redirect(`${process.env.BASEURL}${redirectPath}`);
-
-        // Set new access token
         res
           .cookie("Token", accessToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
             maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
           })
           .cookie("RefreshToken", refreshToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
             maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
           })
           .redirect(`${process.env.BASEURL}${redirectPath}`);
+
+        // Set new access token
+        // res
+        //   .cookie("Token", accessToken, {
+        //     httpOnly: true,
+        //     secure: false,
+        //     sameSite: "Strict",
+        //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        //   })
+        //   .cookie("RefreshToken", refreshToken, {
+        //     httpOnly: true,
+        //     secure: false,
+        //     sameSite: "Strict",
+        //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+        //   })
+        //   .redirect(`${process.env.BASEURL}${redirectPath}`);
       },
     );
     // POST: Create Users API Route
@@ -5164,39 +5262,19 @@ ORDER BY stock ASC;
           },
         );
 
-        // res
-        //   .cookie("Token", accessToken, {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        //   })
-        //   .cookie("RefreshToken", refreshToken, {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-        //   })
-        //   .status(200)
-        //   .json({
-        //     message: "Login successful",
-        //     login: true,
-        //     role,
-        //   });
-
         res
           .cookie("Token", accessToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
             maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
           })
           .cookie("RefreshToken", refreshToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
             maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
           })
           .status(200)
@@ -5205,6 +5283,26 @@ ORDER BY stock ASC;
             login: true,
             role,
           });
+
+        // res
+        //   .cookie("Token", accessToken, {
+        //     httpOnly: true,
+        //     secure: false,
+        //     sameSite: "Strict",
+        //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        //   })
+        //   .cookie("RefreshToken", refreshToken, {
+        //     httpOnly: true,
+        //     secure: false,
+        //     sameSite: "Strict",
+        //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+        //   })
+        //   .status(200)
+        //   .json({
+        //     message: "Login successful",
+        //     login: true,
+        //     role,
+        //   });
       } catch (err) {
         res.status(500).json({ message: err.message });
       }
@@ -5279,37 +5377,21 @@ ORDER BY stock ASC;
     );
     // Logout Route
     app.post("/logout", (req, res) => {
-      // res
-      //   .clearCookie("Token", {
-      //     httpOnly: true,
-      //     secure: true,
-      //     sameSite: "None",
-      //     domain: ".bazarigo.com",
-      //     path: "/",
-      //     maxAge: 0,
-      //   })
-      //   .clearCookie("RefreshToken", {
-      //     httpOnly: true,
-      //     secure: true,
-      //     sameSite: "None",
-      //     domain: ".bazarigo.com",
-      //     path: "/",
-      //     maxAge: 0,
-      //   })
-      //   .status(200)
-      //   .json({
-      //     message: "logout success",
-      //     logOut: true,
-      //   });
       res
         .clearCookie("Token", {
           httpOnly: true,
-          sameSite: "Strict",
+          secure: true,
+          sameSite: "None",
+          domain: ".bazarigo.com",
+          path: "/",
           maxAge: 0,
         })
         .clearCookie("RefreshToken", {
           httpOnly: true,
-          sameSite: "Strict",
+          secure: true,
+          sameSite: "None",
+          domain: ".bazarigo.com",
+          path: "/",
           maxAge: 0,
         })
         .status(200)
@@ -5317,6 +5399,22 @@ ORDER BY stock ASC;
           message: "logout success",
           logOut: true,
         });
+      // res
+      //   .clearCookie("Token", {
+      //     httpOnly: true,
+      //     sameSite: "Strict",
+      //     maxAge: 0,
+      //   })
+      //   .clearCookie("RefreshToken", {
+      //     httpOnly: true,
+      //     sameSite: "Strict",
+      //     maxAge: 0,
+      //   })
+      //   .status(200)
+      //   .json({
+      //     message: "logout success",
+      //     logOut: true,
+      //   });
     });
 
     // Forget Password
@@ -7973,7 +8071,6 @@ WHERE customer_email = $1;
           "SELECT * FROM promotions WHERE code=$1 AND is_active=true AND CURRENT_DATE BETWEEN start_date AND end_date",
           [code],
         );
-        console.log(code);
 
         if (promoResult.rows.length === 0)
           return res.status(400).json({ message: "Invalid  promo" });
@@ -7982,8 +8079,8 @@ WHERE customer_email = $1;
 
         // Check if already used
         const usedCheck = await pool.query(
-          "SELECT * FROM user_promotions WHERE user_id=$1 AND promo_id=$2 AND used=true",
-          [userId, promo.id],
+          "SELECT * FROM user_promotions WHERE user_id=$1 AND promo_id=$2 AND used=$3",
+          [userId, promo.id, true],
         );
         if (usedCheck.rows.length > 0)
           return res.status(400).json({ message: "Already Used Promo!" });
@@ -8014,7 +8111,7 @@ WHERE customer_email = $1;
             return res.status(401).send("unauthorized access");
           }
           const result = await pool.query(
-            `SELECT p.code, p.discount, up.id as user_promo_id
+            `SELECT p.code, p.discount, up.id as user_promo_id,up.used as is_used
        FROM user_promotions up
        JOIN promotions p ON up.promo_id = p.id
        WHERE up.user_id=$1 AND up.used=false`,

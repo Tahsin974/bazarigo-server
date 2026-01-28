@@ -43,6 +43,18 @@ CREATE TABLE products (
     seller_role VARCHAR(50) 
 );
 
+CREATE TABLE product_variants (
+  id VARCHAR(255) PRIMARY KEY,
+  product_id VARCHAR(255) REFERENCES products(id) ON DELETE CASCADE,
+  attributes JSONB,
+  regular_price INT,
+  sale_price INT,
+  stock INT,
+  image TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+
 
 
 -- Flash Sale Products Table
@@ -347,8 +359,12 @@ CREATE TABLE user_promotions (
     promo_id INT NOT NULL,
     used BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT NOW(),
-    CONSTRAINT fk_promo FOREIGN KEY(promo_id) REFERENCES promotions(id)
+    CONSTRAINT fk_promo 
+        FOREIGN KEY (promo_id) 
+        REFERENCES promotions(id)
+        ON DELETE CASCADE
 );
+
 
 
 CREATE TABLE flash_sale_settings (

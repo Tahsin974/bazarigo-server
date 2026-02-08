@@ -306,6 +306,8 @@ const IMAGE_COLUMNS = [
   { table: "banner", column: "image" },
   { table: "products", column: "images" },
   { table: "products", column: "thumbnail" },
+  { table: "products", column: "variants_images" },
+
   { table: "sellers", column: "img" },
   { table: "sellers", column: "nid_front_file" },
   { table: "sellers", column: "nid_back_file" },
@@ -379,6 +381,11 @@ function moveUnusedImages(files) {
     console.log(`Moved: ${file} → ${finalDest}`);
   });
 }
+function toInt(value, fallback = 0) {
+  const n = parseInt(value);
+  return isNaN(n) ? fallback : n;
+}
+
 async function run() {
   try {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -388,12 +395,11 @@ async function run() {
       Electronics: 0.04, // 4%
       Fashion: 0.08, // 8%
       "Health & Beauty": 0.1, // 10%
-      "Furniture & Home Decor": 0.06, // 6%
+      "Home & Living": 0.06, // 6%
+      "Grocery & Food": 0.03, // 3%
       "Sports & Outdoors": 0.06, // 6%
-      "Toys & Baby Products": 0.05, // 5%
-      "Automotive & Industrial": 0.05, // 5%
-      "Grocery & Food Items": 0.03, // 3%
-      "Pets & Pet Care": 0.04, // 4%
+      "Toys & Kids": 0.05, // 5%
+      "Pet Supplies": 0.04, // 4%
     };
 
     // Database connection and operations would go here
@@ -469,6 +475,7 @@ async function run() {
     // "0 5 * * 0"
 
     cron.schedule("0 5 * * 0", async () => {
+      console.log("Running trending products update...");
       try {
         // First: set trending = true for qualifying products
         const updateTrendingQuery = `
@@ -556,32 +563,32 @@ async function run() {
       }
     });
 
+    // ==========================
     // 06:30 AM daily - expired flash sale cleanup
+    // ==========================
+
+    // "30 6 * * *" => প্রতি দিন সকাল 6:30 টা
 
     cron.schedule("30 6 * * *", async () => {
+      console.log("Running flash sale cleanup...");
       try {
         const now = Math.floor(Date.now() / 1000);
 
-        // শেষ হওয়া ফ্ল্যাশ সেলগুলো সিলেক্ট
-        const selectQuery = `SELECT id, sale_products FROM flashSaleProducts WHERE end_time <= $1`;
-        const expiredResult = await pool.query(selectQuery, [now]);
+        // শেষ হওয়া ফ্ল্যাশ সেলগুলো
+        const expiredResult = await pool.query(
+          `SELECT id, sale_products FROM flashSaleProducts WHERE end_time <= $1`,
+          [now],
+        );
+
         if (expiredResult.rowCount === 0) return;
 
         const flashSales = expiredResult.rows;
 
         for (const sale of flashSales) {
-          let flashProducts;
-          try {
-            flashProducts = sale.sale_products;
-          } catch (err) {
-            console.error(
-              `[FlashSale] Invalid JSON for sale id ${sale.id}`,
-              err.message,
-            );
-            continue;
-          }
+          const flashProducts = sale.sale_products;
 
           for (const flashProd of flashProducts) {
+            // main product
             const productRes = await pool.query(
               `SELECT * FROM products WHERE id = $1`,
               [flashProd.id],
@@ -590,81 +597,67 @@ async function run() {
 
             const mainProduct = productRes.rows[0];
 
-            const mainVariants = mainProduct.extras?.variants || [];
-            const flashVariants = flashProd.extras?.variants || [];
+            // ✅ Variant stock restore
+            if (flashProd.variants?.length > 0) {
+              for (const fv of flashProd.variants) {
+                const stockToAdd = parseInt(fv.stock) || 0; // Ensure integer
 
-            if (flashVariants.length > 0 && mainVariants.length > 0) {
-              // ক্রম অনুযায়ী ভেরিয়েন্ট স্টক যোগ
-              const updatedVariants = mainVariants.map((v, i) => {
-                const fVar = flashVariants[i];
-                return fVar
-                  ? { ...v, stock: (v.stock || 0) + (fVar.stock || 0) }
-                  : v;
-              });
+                await pool.query(
+                  `UPDATE product_variants SET stock = stock + $1::int WHERE id = $2`,
+                  [stockToAdd, fv.id],
+                );
+              }
 
-              mainProduct.extras = {
-                ...mainProduct.extras,
-                variants: updatedVariants,
-              };
-              mainProduct.stock = updatedVariants.reduce(
-                (sum, v) => sum + (v.stock || 0),
-                0,
+              // Update main product stock = sum of variant stock
+              const totalStockRes = await pool.query(
+                `SELECT COALESCE(SUM(stock),0) AS total_stock FROM product_variants WHERE product_id = $1`,
+                [mainProduct.id],
               );
+              mainProduct.stock = totalStockRes.rows[0].total_stock;
             } else {
+              // Single product
               mainProduct.stock =
-                (mainProduct.stock || 0) + (flashProd.stock || 0);
+                (mainProduct.stock || 0) + (parseInt(flashProd.stock) || 0);
             }
 
             mainProduct.isflashsale = false;
 
-            // প্রোডাক্ট আপডেট
+            // main product update
             await pool.query(
-              `UPDATE products SET stock=$1, extras=$2, isFlashSale=$3 WHERE id=$4`,
+              `UPDATE products SET stock=$1, isflashsale=false WHERE id=$2`,
+              [mainProduct.stock, mainProduct.id],
+            );
+
+            // carts update
+            await pool.query(
+              `
+        UPDATE carts
+        SET productinfo = (
+          SELECT jsonb_agg(
+            CASE
+              WHEN prod->>'product_Id' = $1
+              THEN prod || jsonb_build_object(
+                'isflashsale', false,
+                'sale_price', $2::numeric,
+                'regular_price', $3::numeric
+              )
+              ELSE prod
+            END
+          )
+          FROM jsonb_array_elements(productinfo) prod
+        )
+        WHERE EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(productinfo) prod
+          WHERE prod->>'product_Id' = $1
+        )
+        `,
               [
-                mainProduct.stock,
-                JSON.stringify(mainProduct.extras || {}),
-                mainProduct.isflashsale,
                 mainProduct.id,
+                mainProduct.sale_price || 0,
+                mainProduct.regular_price || 0,
               ],
             );
-            // 🔹 Update carts: reset flash price & regular price
-            // 🔹 Update carts: reset flash price & regular price
-            const cartsRes = await pool.query(
-              `SELECT cart_id, productinfo
-     FROM carts
-     WHERE EXISTS (
-       SELECT 1
-       FROM jsonb_array_elements(productinfo) AS prod
-       WHERE prod->>'product_Id' = $1
-     )`,
-              [mainProduct.id], // mainProduct.id string হিসেবে pass করতে হবে
-            );
-
-            const updatePromises = cartsRes.rows.map(async (cart) => {
-              const updatedProductInfo = cart.productinfo.map((prod) => {
-                if (prod.product_Id === mainProduct.id && prod.isflashsale) {
-                  // mainProduct.extras.variants ধরে update
-
-                  return {
-                    ...prod,
-                    isflashsale: false,
-
-                    sale_price: mainProduct.sale_price, // main product এর sale_price
-                    regular_price: mainProduct.regular_price, // main product এর regular_price
-                  };
-                }
-                return prod;
-              });
-
-              const result = await pool.query(
-                `UPDATE carts SET productinfo = $1 WHERE cart_id = $2`,
-                [JSON.stringify(updatedProductInfo), cart.cartid],
-              );
-
-              return result;
-            });
-
-            await Promise.all(updatePromises);
           }
         }
 
@@ -679,42 +672,36 @@ async function run() {
       }
     });
 
+    // ==========================
     // 12:00 AM daily - auto flash sale generation
+    // ==========================
+
+    // "0 0 * * *" => প্রতি দিন রাত 12 টা
+
     cron.schedule("0 0 * * *", async () => {
       try {
         const settingsRes = await pool.query(
-          "SELECT is_auto_enabled FROM flash_sale_settings WHERE id=1;",
+          "SELECT is_auto_enabled FROM flash_sale_settings WHERE id=1",
         );
-        if (!settingsRes.rows[0].is_auto_enabled) {
-          return;
-        }
+        if (!settingsRes.rows[0]?.is_auto_enabled) return;
 
         const now = Math.floor(Date.now() / 1000);
 
-        // Check for active flash sale
+        // Check active flash sale
         const activeRes = await pool.query(
-          `SELECT * FROM flashSaleProducts WHERE isactive = true AND end_time > $1 LIMIT 1;`,
+          `SELECT * FROM flashSaleProducts WHERE isactive = true AND end_time > $1 LIMIT 1`,
           [now],
         );
+        if (activeRes.rows.length > 0) return;
 
-        if (activeRes.rows.length > 0) {
-          return;
-        }
-
-        // Get all products
-        const productRes = await pool.query(`SELECT * FROM products;`);
+        const productRes = await pool.query(`SELECT * FROM products`);
         const allProducts = productRes.rows;
 
-        // Candidate filter
         const candidates = allProducts.filter(
           (p) => (p.rating > 4.5 || p.isnew) && p.stock > 30,
         );
+        if (!candidates.length) return;
 
-        if (!candidates.length) {
-          return;
-        }
-
-        // Random select up to 100
         const autoSelected = candidates
           .sort(() => Math.random() - 0.5)
           .slice(0, 100);
@@ -725,9 +712,6 @@ async function run() {
         let productPayload = [];
         let flashSalePayload = [];
 
-        // ======================
-        // 🔹 Variant Logic
-        // ======================
         for (const prod of autoSelected) {
           const discount =
             Math.floor(Math.random() * (maxDiscount - minDiscount + 1)) +
@@ -735,133 +719,106 @@ async function run() {
 
           let updatedProd = { ...prod, isflashsale: true };
           let flashSaleProd = { ...prod, isflashsale: true, discount };
-          let updatedProdVariants = [];
-          let flashSaleProdVariants = [];
 
-          if (prod.extras?.variants?.length > 0) {
-            // 👉 যদি variant থাকে
-            prod.extras.variants.map((variant) => {
-              const minStock = variant.stock > 50 ? 40 : 2;
-              const maxStock = variant.stock > 50 ? 45 : 5;
-              const variantFlashStock =
+          // ✅ Variant logic using product_variants
+          if (prod.variants?.length > 0) {
+            const variantRes = await pool.query(
+              `SELECT * FROM product_variants WHERE product_id=$1`,
+              [prod.id],
+            );
+            const variants = variantRes.rows;
+
+            let updatedVariants = [];
+            let flashVariants = [];
+
+            for (const v of variants) {
+              const minStock = v.stock > 50 ? 40 : 2;
+              const maxStock = v.stock > 50 ? 45 : 5;
+              const flashStock =
                 Math.floor(Math.random() * (maxStock - minStock + 1)) +
                 minStock;
-              const newVariantStock = variant.stock - variantFlashStock;
+              const newStock = v.stock - flashStock;
 
-              const variantSalePrice = Math.round(
-                (variant.regular_price ?? 0) -
-                  ((variant.regular_price ?? 0) * discount) / 100,
+              const salePrice = Math.round(
+                (v.regular_price || 0) -
+                  ((v.regular_price || 0) * discount) / 100,
               );
 
-              // flash sale variant
-              flashSaleProdVariants.push({
-                ...variant,
-                stock: variantFlashStock,
-                sale_price: variantSalePrice,
+              flashVariants.push({
+                ...v,
+                stock: flashStock,
+                sale_price: salePrice,
               });
+              updatedVariants.push({ ...v, stock: newStock });
+            }
 
-              // main updated product variant
-              updatedProdVariants.push({
-                ...variant,
-                stock: newVariantStock,
-              });
-            });
-
-            updatedProd = {
-              ...updatedProd,
-              extras: { ...prod.extras, variants: updatedProdVariants },
-              stock: updatedProdVariants.reduce(
-                (sum, v) => sum + (v.stock ?? 0),
-                0,
-              ),
-            };
-
-            flashSaleProd = {
-              ...flashSaleProd,
-              extras: { ...prod.extras, variants: flashSaleProdVariants },
-              stock: flashSaleProdVariants.reduce(
-                (sum, v) => sum + (v.stock ?? 0),
-                0,
-              ),
-              sale_price: Math.round(
-                prod.regular_price - (prod.regular_price * discount) / 100,
-              ),
-            };
-
-            productPayload.push(updatedProd);
-            flashSalePayload.push(flashSaleProd);
-          } else {
-            // 👉 single product
-            const minStock = prod.stock > 50 ? 45 : 3;
-            const maxStock = prod.stock > 50 ? 50 : 5;
-            const flashSaleStock =
-              Math.floor(Math.random() * (maxStock - minStock + 1)) + minStock;
-            const newStock = prod.stock - flashSaleStock;
-            const salePrice = Math.round(
-              (prod.regular_price ?? 0) -
-                ((prod.regular_price ?? 0) * discount) / 100,
+            flashSaleProd.variants = flashVariants;
+            flashSaleProd.stock = flashVariants.reduce(
+              (sum, v) => sum + (v.stock || 0),
+              0,
             );
 
-            updatedProd = {
-              ...updatedProd,
-              stock: newStock,
-            };
+            updatedProd.variants = updatedVariants;
+            updatedProd.stock = updatedVariants.reduce(
+              (sum, v) => sum + (v.stock || 0),
+              0,
+            );
 
-            flashSaleProd = {
-              ...flashSaleProd,
-              stock: flashSaleStock,
-              sale_price: salePrice,
-            };
-
-            productPayload.push(updatedProd);
             flashSalePayload.push(flashSaleProd);
+            productPayload.push(updatedProd);
+          } else {
+            // Single product
+            const minStock = prod.stock > 50 ? 45 : 3;
+            const maxStock = prod.stock > 50 ? 50 : 5;
+            const flashStock =
+              Math.floor(Math.random() * (maxStock - minStock + 1)) + minStock;
+            const newStock = prod.stock - flashStock;
+            const salePrice = Math.round(
+              (prod.regular_price || 0) -
+                ((prod.regular_price || 0) * discount) / 100,
+            );
+
+            updatedProd.stock = newStock;
+            flashSaleProd.stock = flashStock;
+            flashSaleProd.sale_price = salePrice;
+
+            flashSalePayload.push(flashSaleProd);
+            productPayload.push(updatedProd);
           }
         }
 
         // Insert new flash sale
         const startTime = now;
-        const endTime = now + 24 * 60 * 60; // 24 hours active
+        const endTime = now + 24 * 60 * 60;
 
         await pool.query(
           `INSERT INTO flashSaleProducts (isactive, start_time, end_time, sale_products)
-       VALUES (true, $1, $2, $3);`,
+       VALUES (true, $1, $2, $3)`,
           [startTime, endTime, JSON.stringify(flashSalePayload)],
         );
 
-        await Promise.all(
-          productPayload.map(async (p) => {
-            const query = `
-          UPDATE products SET  product_name=$1, regular_price=$2, sale_price=$3, discount=$4, rating=$5,
-                isbestseller=$6, ishot=$7, isnew=$8, istrending=$9, islimitedstock=$10, isexclusive=$11, isflashsale=$12,
-                category=$13, subcategory=$14, description=$15, stock=$16, brand=$17, images=$18, extras=$19,
-                 updatedAt=$20 WHERE id = $21;
-        `;
-            const values = [
-              p.product_name,
-              p.regular_price,
-              p.sale_price,
-              p.discount,
-              p.rating,
-              p.isbestseller,
-              p.ishot,
-              p.isnew,
-              p.istrending,
-              p.islimitedstock,
-              p.isexclusive,
-              p.isflashSale,
-              p.category,
-              p.subcategory,
-              p.description,
-              p.stock,
-              p.brand,
-              p.images,
-              p.extras,
-              p.updatedAt,
-              p.id,
-            ];
-            await pool.query(query, values);
-          }),
-        );
+        // Update main product stocks
+        for (const p of productPayload) {
+          if (p.variants?.length > 0) {
+            for (const v of p.variants) {
+              await pool.query(
+                `UPDATE product_variants SET stock=$1 WHERE id=$2`,
+                [v.stock, v.id],
+              );
+            }
+
+            const totalStockRes = await pool.query(
+              `SELECT COALESCE(SUM(stock),0) AS total_stock FROM product_variants WHERE product_id=$1`,
+              [p.id],
+            );
+            p.stock = totalStockRes.rows[0].total_stock;
+          }
+
+          await pool.query(
+            `UPDATE products SET stock=$1, isflashsale=true WHERE id=$2`,
+            [p.stock, p.id],
+          );
+        }
       } catch (err) {
         console.error("❌ Flash sale generation failed:", err.message);
       }
@@ -881,8 +838,6 @@ WHERE jsonb_array_length(c.productinfo) > 0
 GROUP BY c.cart_id, u.id, u.role;
 
     `);
-
-        console.log("Unique users fetched for notification:", carts);
 
         if (carts.length === 0) {
           console.log("No carts found for notification.");
@@ -936,36 +891,37 @@ GROUP BY c.cart_id, u.id, u.role;
     // --------------------Cron Jobs End-------------------//
 
     // Excel Download API Route
+
     app.get("/api/download-excel", async (req, res) => {
       try {
         const workbook = new ExcelJS.Workbook();
-        const sheet = workbook.addWorksheet("Products");
 
-        // Column definitions
-        sheet.columns = [
+        // 1️⃣ Products sheet
+        const productSheet = workbook.addWorksheet("Products");
+        productSheet.columns = [
+          { header: "productId", key: "productId", width: 30 },
           { header: "productName", key: "productName", width: 30 },
-          { header: "brand", key: "brand", width: 30 },
-          { header: "regular_price", key: "regular_price", width: 30 },
+          { header: "brand", key: "brand", width: 20 },
+          { header: "regular_price", key: "regular_price", width: 15 },
           { header: "sale_price", key: "sale_price", width: 15 },
-          { header: "discount", key: "discount", width: 30 },
-          { header: "stock", key: "stock", width: 30 },
-          { header: "category", key: "category", width: 30 },
-          { header: "subcategory", key: "subcategory", width: 30 },
-          { header: "subcategory_item", key: "subcategory_item", width: 30 },
+          { header: "discount", key: "discount", width: 10 },
+          { header: "stock", key: "stock", width: 10 },
+          { header: "category", key: "category", width: 20 },
+          { header: "subcategory", key: "subcategory", width: 20 },
+          { header: "subcategory_item", key: "subcategory_item", width: 20 },
           { header: "description", key: "description", width: 30 },
           { header: "images", key: "images", width: 30 },
           { header: "thumbnail", key: "thumbnail", width: 30 },
-          { header: "extras", key: "extras", width: 50 },
         ];
 
-        // Header bold করার জন্য
-        sheet.getRow(1).eachCell((cell) => {
+        productSheet.getRow(1).eachCell((cell) => {
           cell.font = { bold: true };
           cell.alignment = { horizontal: "center", vertical: "middle" };
         });
 
-        // Sample data – replace with database data in production
-        sheet.addRow({
+        // --- Placeholder / instructions row ---
+        productSheet.addRow({
+          productId: "(enter product Id)",
           productName: "(enter product name)",
           brand: "(enter brand)",
           regular_price: "(enter regular price)",
@@ -978,42 +934,27 @@ GROUP BY c.cart_id, u.id, u.role;
           description: "(enter product description)",
           images: "(upload product image manually)",
           thumbnail: "(upload thumbnail image manually)",
-          extras: JSON.stringify({
-            variants: [
-              {
-                size: "Enter size here (e.g., XL)",
-                color: "Enter color here (e.g., White)",
-                material: "Enter material here (e.g., Cotton)",
-                stock: "Enter stock quantity here (e.g., 10)",
-                regular_price: "Enter regular price here (e.g., 400)",
-                sale_price: "Enter sale price here (0 if no discount)",
-              },
-            ],
-            notes: [
-              "প্রতিটি ভেরিয়েন্ট আলাদা করে লিখুন।",
-              "sale_price যদি না থাকে, 0 লিখুন।",
-              "Stock এবং price সঠিকভাবে আপডেট করুন।",
-            ],
-          }),
         });
-        sheet.addRow({});
+        productSheet.addRow({}); // Empty row for spacing
 
-        const exampleRow = sheet.addRow([
-          "Example: Enter product information here",
+        const exampleRow = productSheet.addRow([
+          "Example: Enter product info here",
         ]);
-
-        // 2) Merge all columns (A থেকে তোমার শেষ column পর্যন্ত)
-        sheet.mergeCells(`A${exampleRow.number}:K${exampleRow.number}`);
-        const mergedCell = sheet.getCell(`A${exampleRow.number}`);
+        productSheet.mergeCells(`A${exampleRow.number}:M${exampleRow.number}`);
+        const mergedCell = productSheet.getCell(`A${exampleRow.number}`);
+        mergedCell.font = { bold: true };
         mergedCell.alignment = {
           horizontal: "center",
           vertical: "middle",
           wrapText: true,
         };
-        mergedCell.font = { bold: true };
-        sheet.getRow(exampleRow.number).height = 50;
+        productSheet.getRow(exampleRow.number).height = 50;
 
-        sheet.addRow({
+        const productId = 1;
+
+        // Sample product row
+        productSheet.addRow({
+          productId,
           productName: "Stylish Ladies Overcoat",
           brand: "Brand X",
           regular_price: 1000,
@@ -1021,186 +962,97 @@ GROUP BY c.cart_id, u.id, u.role;
           discount: 15,
           stock: 50,
           category: "Fashion",
-          subcategory: "Clothing",
+          subcategory: "Women’s Apparel",
           subcategory_item: "Dresses",
           description: "This is an example description of the product.",
-          images: "image1.jpg, image2.jpg",
+          images: "image1.jpg,image2.jpg",
           thumbnail: "thumbnail.jpg",
-          extras: JSON.stringify({
-            variants: [
-              {
-                size: "XL",
-                color: "Light Brown",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "XL",
-                color: "Russet",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "XL",
-                color: "Black",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "XL",
-                color: "Maroon",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "XL",
-                color: "Dark Green",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "XL",
-                color: "Navy Blue",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "XL",
-                color: "Ice Gray",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "L",
-                color: "Light Brown",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "L",
-                color: "Russet",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "L",
-                color: "Black",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "L",
-                color: "Maroon",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "L",
-                color: "Dark Green",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "L",
-                color: "Navy Blue",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "L",
-                color: "Ice Gray",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "M",
-                color: "Light Brown",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "M",
-                color: "Russet",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "M",
-                color: "Black",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "M",
-                color: "Maroon",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "M",
-                color: "Dark Green",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "M",
-                color: "Navy Blue",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-              {
-                size: "M",
-                color: "Ice Gray",
-                stock: 10,
-                material: "PU Leather",
-                sale_price: 0,
-                regular_price: 1200,
-              },
-            ],
-          }),
         });
 
-        // Set response headers
+        // 2️⃣ Variants sheet
+        const variantSheet = workbook.addWorksheet("Variants");
+        variantSheet.columns = [
+          { header: "productId", key: "productId", width: 30 },
+          { header: "regular_price", key: "regular_price", width: 15 },
+          { header: "sale_price", key: "sale_price", width: 15 },
+          { header: "stock", key: "stock", width: 10 },
+          { header: "attributes", key: "attributes", width: 50 },
+        ];
+
+        variantSheet.getRow(1).eachCell((cell) => {
+          cell.font = { bold: true };
+          cell.alignment = { horizontal: "center", vertical: "middle" };
+        });
+
+        // --- Placeholder / instructions row ---
+        variantSheet.addRow({
+          productId: "(enter product Id)",
+
+          regular_price: "(enter Variant regular price)",
+          sale_price: "(enter Variant sale price)",
+          stock: "(enter Variant Stock Amount)",
+          attributes: "(enter Variant Attributes)",
+        });
+        variantSheet.addRow({}); // Empty row for spacing
+
+        const exampleRowVariant = variantSheet.addRow([
+          "Example: Enter product variant here",
+        ]);
+        variantSheet.mergeCells(`A${exampleRow.number}:M${exampleRow.number}`);
+        const mergedCellVariant = variantSheet.getCell(
+          `A${exampleRowVariant.number}`,
+        );
+        mergedCellVariant.font = { bold: true };
+        mergedCellVariant.alignment = {
+          horizontal: "center",
+          vertical: "middle",
+          wrapText: true,
+        };
+        variantSheet.getRow(exampleRowVariant.number).height = 50;
+
+        // Sample variants rows
+        const sampleVariants = [
+          {
+            size: "XL",
+            color: "Light Brown",
+            material: "PU Leather",
+            stock: 10,
+            regular_price: 1200,
+            sale_price: 0,
+          },
+          {
+            size: "L",
+            color: "Black",
+            material: "PU Leather",
+            stock: 10,
+            regular_price: 1200,
+            sale_price: 0,
+          },
+          {
+            size: "M",
+            color: "Maroon",
+            material: "PU Leather",
+            stock: 10,
+            regular_price: 1200,
+            sale_price: 0,
+          },
+        ];
+
+        for (let variant of sampleVariants) {
+          variantSheet.addRow({
+            productId,
+            regular_price: variant.regular_price,
+            sale_price: variant.sale_price,
+            stock: variant.stock,
+            attributes: JSON.stringify({
+              size: variant.size,
+              color: variant.color,
+              material: variant.material,
+            }),
+          });
+        }
+
+        // 3️⃣ Set headers for Excel download
         res.setHeader(
           "Content-Type",
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1334,19 +1186,43 @@ ORDER BY store_name, id ASC;
 
       async (req, res) => {
         try {
-          const query = `SELECT
-    p.*,
-    COALESCE(SUM((pi->>'qty')::INT)::INT, 0) AS sold
-FROM products p
-LEFT JOIN orders o
-    ON TRUE
-LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
-    ON TRUE
-LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
-    ON pi->>'product_Id' = p.id
-GROUP BY p.id, p.product_name
-ORDER BY sold DESC;
-`;
+          const query = `
+      SELECT
+        p.*,
+        COALESCE(SUM((pi->>'qty')::INT), 0) AS sold,
+        COALESCE(
+          jsonb_agg(DISTINCT jsonb_strip_nulls(v_base || v.attributes))
+            FILTER (WHERE v.id IS NOT NULL),
+          '[]'
+        ) AS variants
+      FROM products p
+      LEFT JOIN (
+        SELECT 
+          id,
+          product_id,
+          regular_price,
+          sale_price,
+          stock,
+          attributes,
+          jsonb_build_object(
+            'id', id,
+            'regular_price', regular_price,
+            'sale_price', sale_price,
+            'stock', stock
+          ) AS v_base
+        FROM product_variants
+      ) v
+        ON v.product_id = p.id
+      LEFT JOIN orders o
+        ON TRUE
+      LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
+        ON TRUE
+      LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
+        ON pi->>'product_Id' = p.id
+      GROUP BY p.id
+      ORDER BY sold DESC;
+    `;
+
           const result = await pool.query(query);
           res.status(200).json({
             message: "Products route is working!",
@@ -1359,6 +1235,7 @@ ORDER BY sold DESC;
     );
 
     //GET: Get Single Product API Route
+
     app.get(
       "/products/:id",
 
@@ -1368,17 +1245,40 @@ ORDER BY sold DESC;
 
           const query = `
       SELECT
-          p.*,
-         COALESCE(SUM((pi->>'qty')::INT)::INT, 0) AS sold
+        p.*,
+        COALESCE(SUM((pi->>'qty')::INT), 0) AS sold,
+        COALESCE(
+          jsonb_agg(DISTINCT jsonb_strip_nulls(v_base || v.attributes))
+            FILTER (WHERE v.id IS NOT NULL),
+          '[]'
+        ) AS variants
       FROM products p
+      LEFT JOIN (
+        SELECT 
+          id,
+          product_id,
+          regular_price,
+          sale_price,
+          stock,
+          attributes,
+          jsonb_build_object(
+            'id', id,
+            'regular_price', regular_price,
+            'sale_price', sale_price,
+            'stock', stock
+          ) AS v_base
+        FROM product_variants
+      ) v
+        ON v.product_id = p.id
       LEFT JOIN orders o
-          ON TRUE
+        ON TRUE
       LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
-          ON TRUE
+        ON TRUE
       LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
-          ON pi->>'product_Id' = p.id
-      WHERE p.id = $1
-      GROUP BY p.id;
+        ON pi->>'product_Id' = p.id
+        WHERE p.id = $1
+      GROUP BY p.id
+      ORDER BY sold DESC;
     `;
 
           const values = [productId];
@@ -1394,74 +1294,72 @@ ORDER BY sold DESC;
       },
     );
     // GET: Share Product API Route
+
     app.get("/share/product/:id", async (req, res) => {
       try {
         const productId = req.params.id;
-        const encodedId = Buffer.from(productId.toString()).toString("base64");
+        // const encodedId = Buffer.from(productId.toString()).toString("base64");
 
-        const query = `SELECT product_name, description, thumbnail FROM products WHERE id = $1`;
-        const result = await pool.query(query, [productId]);
+        const BASE_URL = process.env.BASEURL;
+        const BACKEND_URL = process.env.URL;
 
-        if (!result.rows.length) {
+        const { rows } = await pool.query(
+          `SELECT product_name, description, thumbnail
+       FROM products WHERE id = $1`,
+          [productId],
+        );
+
+        if (!rows.length) {
           return res.status(404).send("Product not found");
         }
 
-        const product = result.rows[0];
-        const cleanDescription = product.description
-          ? product.description
-              .replace(/<[^>]*>/g, "")
-              .replace(/\s+/g, " ")
-              .trim()
-              .slice(0, 120) + "..."
-          : "Check out this product!";
+        const product = rows[0];
+
+        const stripHtml = (str = "") =>
+          str
+            .replace(/<[^>]*>/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        const title = product.product_name;
+        const description =
+          stripHtml(product.description).slice(0, 120) + "...";
 
         const imageUrl = product.thumbnail
-          ? `${process.env.URL}${product.thumbnail}`
-          : "";
+          ? `${BACKEND_URL}${product.thumbnail}`
+          : `${BASE_URL}/Bazarigo-Homepage-Thumbnail.jpg`;
 
-        // চেক করা হচ্ছে এটি ফেসবুক বট কি না
-        const userAgent = req.headers["user-agent"] || "";
-        const isSocialBot =
-          /facebookexternalhit|Facebot|Twitterbot|WhatsApp/.test(userAgent);
+        const ua = req.headers["user-agent"] || "";
+        const isBot =
+          /facebookexternalhit|Facebot|Twitterbot|WhatsApp|LinkedInBot/i.test(
+            ua,
+          );
 
-        res.send(`
-<!DOCTYPE html>
+        res.send(`<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>${product.product_name}</title>
-  
-  <meta property="og:type" content="website" />
-  <meta property="og:title" content="${product.product_name}" />
-  <meta property="og:description" content="${cleanDescription}" />
-  <meta property="og:url" content="${process.env.BASEURL}/product/${encodedId}" />
+  <meta charset="utf-8" />
+  <title>${title}</title>
+
+  <link rel="canonical" href="${BASE_URL}/product/${productId}" />
+
+  <meta property="og:type" content="product" />
+  <meta property="og:title" content="${title}" />
+  <meta property="og:description" content="${description}" />
   <meta property="og:image" content="${imageUrl}" />
-  <meta property="og:image:secure_url" content="${imageUrl}" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-  
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:image" content="${imageUrl}" />
+  <meta property="og:url" content="${BASE_URL}/product/${productId}" />
 
-  ${!isSocialBot ? `<meta http-equiv="refresh" content="0; url=${process.env.BASEURL}/product/${encodedId}" />` : ""}
+  <meta name="twitter:card" content="summary_large_image" />
 </head>
+
 <body>
-  <div style="text-align: center; margin-top: 50px;">
-    <p>Loading product...</p>
-    <script>
-      // যদি মেটা রিফ্রেশ কাজ না করে, তবে জাভাস্ক্রিপ্ট দিয়ে রিডাইরেক্ট হবে (বটদের জন্য নয়)
-      if (!${isSocialBot}) {
-        setTimeout(() => {
-          window.location.href = "${process.env.BASEURL}/product/${encodedId}";
-        }, 500);
-      }
-    </script>
-  </div>
+  <p>Loading product…</p>
 </body>
-</html>
-`);
+</html>`);
       } catch (err) {
-        console.error("Share product error:", err);
+        console.error(err);
         res.status(500).send("Server error");
       }
     });
@@ -1474,18 +1372,43 @@ ORDER BY sold DESC;
         try {
           const { sellerId } = req.params;
 
-          const query = `SELECT
-          p.*,
-         COALESCE(SUM((pi->>'qty')::INT)::INT, 0) AS sold
+          const query = `
+      SELECT
+        p.*,
+        COALESCE(SUM((pi->>'qty')::INT), 0) AS sold,
+        COALESCE(
+          jsonb_agg(DISTINCT jsonb_strip_nulls(v_base || v.attributes))
+            FILTER (WHERE v.id IS NOT NULL),
+          '[]'
+        ) AS variants
       FROM products p
+      LEFT JOIN (
+        SELECT 
+          id,
+          product_id,
+          regular_price,
+          sale_price,
+          stock,
+          attributes,
+          jsonb_build_object(
+            'id', id,
+            'regular_price', regular_price,
+            'sale_price', sale_price,
+            'stock', stock
+          ) AS v_base
+        FROM product_variants
+      ) v
+        ON v.product_id = p.id
       LEFT JOIN orders o
-          ON TRUE
+        ON TRUE
       LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
-          ON TRUE
+        ON TRUE
       LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
-          ON pi->>'product_Id' = p.id
-      WHERE p.seller_id = $1
-      GROUP BY p.id;`;
+        ON pi->>'product_Id' = p.id
+        WHERE p.seller_id = $1
+      GROUP BY p.id
+      ORDER BY sold DESC;
+    `;
           const values = [sellerId];
           const result = await pool.query(query, values);
 
@@ -1506,7 +1429,8 @@ ORDER BY sold DESC;
       passport.authenticate("jwt", { session: false }),
       upload.fields([
         { name: "thumbnail", maxCount: 1 },
-        { name: "images", maxCount: 10 },
+        { name: "images", maxCount: 30 },
+        { name: "variants_images", maxCount: 30 },
       ]),
       async (req, res) => {
         try {
@@ -1530,9 +1454,20 @@ ORDER BY sold DESC;
             stock,
             brand,
             weight,
-            extras,
+            variants,
           } = req.body;
 
+          // Parse variants if string
+          let parsedVariants = variants;
+          if (typeof variants === "string") {
+            try {
+              parsedVariants = JSON.parse(variants);
+            } catch (e) {
+              return res.status(400).json({ message: "Invalid variants JSON" });
+            }
+          }
+
+          // Seller info
           const user = req.user;
           let sellerId, sellerName, sellerStoreName, sellerRole;
 
@@ -1553,7 +1488,8 @@ ORDER BY sold DESC;
             }
           }
 
-          const sanitizedDescription = sanitizeHtml(description, {
+          // Sanitize description
+          const sanitizedDescription = sanitizeHtml(description || "", {
             allowedTags: sanitizeHtml.defaults.allowedTags.concat([
               "img",
               "span",
@@ -1568,27 +1504,24 @@ ORDER BY sold DESC;
               div: ["class", "style"],
               img: ["src", "alt", "width", "height"],
             },
-            allowedStyles: {
-              "*": {
-                color: [/^.*$/],
-                "background-color": [/^.*$/],
-                "text-align": [/^left|right|center|justify$/],
-                "list-style-type": [/^.*$/],
-                "margin-left": [/^\d+(px|em|%)$/],
-                "padding-left": [/^\d+(px|em|%)$/],
-              },
-            },
           });
 
           const productId = uuidv4();
+
+          // Upload directories
           const uploadDirs = {
-            image: path.join(__dirname, "uploads", "products", "images"),
-            video: path.join(__dirname, "uploads", "products", "videos"),
+            product: path.join(__dirname, "uploads", "products", "images"),
             thumbnail: path.join(
               __dirname,
               "uploads",
               "products",
               "thumbnails",
+            ),
+            variants: path.join(
+              __dirname,
+              "uploads",
+              "products",
+              "variants_images",
             ),
           };
 
@@ -1596,55 +1529,70 @@ ORDER BY sold DESC;
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
           }
 
-          // Thumbnail
+          /* ---------------- THUMBNAIL ---------------- */
           let thumbnailPath = null;
           if (req.files.thumbnail && req.files.thumbnail.length > 0) {
             const thumbFile = req.files.thumbnail[0];
             const thumbName = `${productName}-${productId}-thumb.webp`;
             const thumbPath = path.join(uploadDirs.thumbnail, thumbName);
+
             await sharp(thumbFile.buffer)
               .webp({ lossless: true })
               .toFile(thumbPath);
             thumbnailPath = `/uploads/products/thumbnails/${thumbName}`;
           }
 
-          // Images & Videos
-          const savedPaths = [];
+          /* ---------------- MAIN PRODUCT IMAGES (UPDATED) ---------------- */
+          const productImages = [];
           if (req.files.images) {
-            for (let i = 0; i < req.files.images.length; i++) {
-              const file = req.files.images[i];
-              const mime = file.mimetype;
+            for (const file of req.files.images) {
+              const imageId = uuidv4(); // ✅ index বাদ
+              const filename = `${productName}-${productId}-${imageId}.webp`;
+              const filepath = path.join(uploadDirs.product, filename);
 
-              if (mime.startsWith("image")) {
-                const filename = `${productName}-${productId}-${i}.webp`;
-                const filepath = path.join(uploadDirs.image, filename);
-                await sharp(file.buffer)
-                  .webp({ lossless: true })
-                  .toFile(filepath);
-                savedPaths.push(`/uploads/products/images/${filename}`);
-              } else if (mime.startsWith("video")) {
-                const ext = mime.split("/")[1];
-                const filename = `${productName}-${i}.${ext}`;
-                const filepath = path.join(uploadDirs.video, filename);
-                await fs.promises.writeFile(filepath, file.buffer);
-                savedPaths.push(`/uploads/products/videos/${filename}`);
-              }
+              await sharp(file.buffer)
+                .webp({ lossless: true })
+                .toFile(filepath);
+
+              productImages.push(`/uploads/products/images/${filename}`);
             }
           }
-          const query = `
+
+          /* ---------------- VARIANT IMAGES (UNCHANGED) ---------------- */
+          const variantImages = [];
+          if (req.files.variants_images) {
+            for (let i = 0; i < req.files.variants_images.length; i++) {
+              const file = req.files.variants_images[i];
+              const filename = `${productName}-${productId}-variant-${i}.webp`;
+              const filepath = path.join(uploadDirs.variants, filename);
+
+              await sharp(file.buffer)
+                .webp({ lossless: true })
+                .toFile(filepath);
+
+              variantImages.push(
+                `/uploads/products/variants_images/${filename}`,
+              );
+            }
+          }
+
+          /* ---------------- INSERT PRODUCT ---------------- */
+          const productQuery = `
         INSERT INTO products (
           id, product_name, regular_price, sale_price, discount, rating,
           isBestSeller, isHot, isNew, isTrending, isLimitedStock, isExclusive, isFlashSale,
-          category, subcategory, description, stock, brand, weight, images, extras,
-          createdAt, updatedAt, seller_id, seller_name, seller_store_name, reviews, seller_role,subcategory_item,thumbnail
+          category, subcategory, subcategory_item, description, stock, brand, weight,
+          images, thumbnail,
+          createdAt, updatedAt, seller_id, seller_name, seller_store_name, seller_role,
+          variants_images
         ) VALUES (
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
-          $14,$15,$16,$17,$18,$19,$20,$21,NOW(),
-          $22,$23,$24,$25,$26,$27,$28,$29
+          $14,$15,$16,$17,$18,$19,$20,$21,$22,
+          NOW(),NOW(),$23,$24,$25,$26,$27
         ) RETURNING *;
       `;
 
-          const values = [
+          const productValues = [
             productId,
             productName,
             regular_price || 0,
@@ -1660,35 +1608,66 @@ ORDER BY sold DESC;
             isFlashSale || false,
             category || null,
             subcategory || null,
+            subcategory_item || null,
             sanitizedDescription || null,
             stock || 0,
             brand || null,
             weight || 1,
-            savedPaths,
-            extras ? extras : {},
-            null,
+            productImages,
+            thumbnailPath,
             sellerId || null,
             sellerName || null,
             sellerStoreName || "",
-            [],
             sellerRole || "",
-            subcategory_item,
-            thumbnailPath,
+            variantImages.length > 0 ? variantImages : null,
           ];
 
-          const result = await pool.query(query, values);
+          const result = await pool.query(productQuery, productValues);
+
+          /* ---------------- INSERT VARIANTS ---------------- */
+          if (Array.isArray(parsedVariants) && parsedVariants.length > 0) {
+            for (const variant of parsedVariants) {
+              const variantId = uuidv4();
+              const {
+                attributes,
+                regular_price: vRegular,
+                sale_price: vSale,
+                stock: vStock,
+              } = variant;
+
+              await pool.query(
+                `
+            INSERT INTO product_variants (
+              id, product_id, attributes, regular_price, sale_price, stock, created_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,NOW());
+          `,
+                [
+                  variantId,
+                  productId,
+                  attributes || {},
+                  toInt(vRegular, regular_price),
+                  toInt(vSale, sale_price),
+                  toInt(vStock, stock),
+                ],
+              );
+            }
+          }
 
           res.status(201).json({
-            message: "Product created successfully",
+            message: "Product and variants created successfully",
+            productId,
+            variantCount: parsedVariants ? parsedVariants.length : 0,
             createdCount: result.rowCount,
           });
         } catch (error) {
+          console.error(error);
           res.status(500).json({ message: error.message });
         }
       },
     );
 
     //POST: Bulk Product Upload API Route
+
     app.post(
       "/products/bulk",
       passport.authenticate("jwt", { session: false }),
@@ -1702,23 +1681,33 @@ ORDER BY sold DESC;
           }
 
           const insertedProducts = [];
+          const user = req.user;
+          let sellerId, sellerName, sellerStoreName, sellerRole;
 
           for (const item of products) {
             item.id = uuidv4();
 
-            let sellerId, sellerName, sellerStoreName, sellerRole;
-            const user = req.user;
+            // Parse variants if string
+            let parsedVariants = item?.variants;
+            if (typeof item.variants === "string") {
+              try {
+                parsedVariants = JSON.parse(item.variants);
+              } catch (e) {
+                return res
+                  .status(400)
+                  .json({ message: "Invalid variants JSON" });
+              }
+            }
 
+            // Seller info
             if (user.role === "seller") {
-              // Logged-in seller এর নিজের তথ্য ব্যবহার
               sellerId = user.id;
               sellerName = user.full_name;
               sellerStoreName = user.store_name;
               sellerRole = user.role;
             } else {
-              // Admin এর ক্ষেত্রে `bazarigo` স্টোর ব্যবহার
               const bazarigo = await pool.query(
-                "SELECT id, full_name, store_name,role FROM admins WHERE email='bazarigo.official@gmail.com' LIMIT 1;",
+                "SELECT id, full_name, store_name, role FROM admins WHERE email='bazarigo.official@gmail.com' LIMIT 1;",
               );
               if (bazarigo.rows.length > 0) {
                 sellerId = bazarigo.rows[0].id;
@@ -1727,29 +1716,23 @@ ORDER BY sold DESC;
                 sellerRole = bazarigo.rows[0].role;
               }
             }
-            // --- sanitize description ---
-            const sanitizedDescription = sanitizeHtml(item.description, {
+
+            // Sanitize description
+            const sanitizedDescription = sanitizeHtml(item.description || "", {
               allowedTags: sanitizeHtml.defaults.allowedTags.concat([
                 "img",
                 "span",
                 "div",
               ]),
-
               allowedAttributes: {
                 ...sanitizeHtml.defaults.allowedAttributes,
-
-                // 👇 VERY IMPORTANT for Quill
                 ul: ["class", "style"],
                 ol: ["class", "style", "type"],
                 li: ["class", "style", "data-list"],
-
                 span: ["class", "style"],
                 div: ["class", "style"],
-
                 img: ["src", "alt", "width", "height"],
               },
-
-              // 👇 allow inline styles (safe list)
               allowedStyles: {
                 "*": {
                   color: [/^.*$/],
@@ -1762,17 +1745,7 @@ ORDER BY sold DESC;
               },
             });
 
-            const uploadDirs = {
-              image: path.join(__dirname, "uploads", "products", "images"),
-              video: path.join(__dirname, "uploads", "products", "videos"),
-            };
-
-            // Create directories if not exist
-            for (const dir of Object.values(uploadDirs)) {
-              if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-            }
-
-            // --- process images ---
+            // Process images
             const savedPaths = (
               await Promise.all(
                 (item.images || []).map(async (imgStr) => {
@@ -1784,7 +1757,6 @@ ORDER BY sold DESC;
                       "",
                     );
                     const buffer = Buffer.from(base64Data, "base64");
-
                     const safeName = (item.productName || "product").replace(
                       /\s+/g,
                       "_",
@@ -1807,44 +1779,53 @@ ORDER BY sold DESC;
                 }),
               )
             ).filter(Boolean);
+            // Calculate main stock
+            let mainStock = toInt(item.stock, 0); // default stock
+            if (
+              parsedVariants &&
+              Array.isArray(parsedVariants) &&
+              parsedVariants.length > 0
+            ) {
+              mainStock = parsedVariants.reduce(
+                (sum, v) => sum + toInt(v.stock, 0),
+                0,
+              );
+            }
 
-            // --- database insert ---
-            const query = `
-        INSERT INTO products (
-          id, product_name, regular_price, sale_price, discount, rating,
-          isBestSeller, isHot, isNew, isTrending, isLimitedStock, isExclusive, isFlashSale,
-          category, subcategory, description, stock, brand, weight, images, extras,
-          createdAt, updatedAt, seller_id, seller_name, seller_store_name,reviews,seller_role,subcategory_item
-        ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
-          $14,$15,$16,$17,$18,$19,$20,$21,NOW(),
-          $22,$23,$24,$25,$26,$27,$28
-        ) RETURNING *;
-      `;
+            // Insert product
+            const productQuery = `
+          INSERT INTO products (
+            id, product_name, regular_price, sale_price, discount, rating,
+            isBestSeller, isHot, isNew, isTrending, isLimitedStock, isExclusive, isFlashSale,
+            category, subcategory, description, stock, brand, weight, images, 
+            createdAt, updatedAt, seller_id, seller_name, seller_store_name, reviews, seller_role, subcategory_item
+          ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW(),NOW(),$21,$22,$23,$24,$25,$26
+          ) RETURNING *;
+        `;
 
-            const values = [
+            const productValues = [
               item.id,
               item.productName || "Untitled",
-              item.regular_price || 0,
-              item.sale_price || 0,
-              item.discount || 0,
+              toInt(item.regular_price, 0),
+              toInt(item.sale_price, 0),
+              toInt(item.discount, 0),
               parseFloat(item.rating) || 0,
               item.isBestSeller || false,
               item.isHot || false,
-              item.isNew || true,
+              item.isNew !== undefined ? item.isNew : true,
               item.isTrending || false,
               item.isLimitedStock || false,
               item.isExclusive || false,
               item.isFlashSale || false,
               item.category || null,
               item.subcategory || null,
+
               sanitizedDescription,
-              item.stock || 0,
+              mainStock,
               item.brand || null,
               parseFloat(item.weight) || 1,
-              savedPaths, // pg converts JS array to TEXT[]
-              JSON.stringify(item.extras),
-              null,
+              savedPaths,
               sellerId || null,
               sellerName || null,
               sellerStoreName || "",
@@ -1852,10 +1833,41 @@ ORDER BY sold DESC;
               sellerRole,
               item.subcategory_item || null,
             ];
-            console.log("Inserting product:", item.productName, values);
 
-            const result = await pool.query(query, values);
+            const result = await pool.query(productQuery, productValues);
             insertedProducts.push(result.rows[0]);
+
+            // Insert variants if exist
+            if (
+              parsedVariants &&
+              Array.isArray(parsedVariants) &&
+              parsedVariants.length > 0
+            ) {
+              for (const variant of parsedVariants) {
+                const variantId = uuidv4();
+                const {
+                  attributes,
+                  regular_price: vRegular,
+                  sale_price: vSale,
+                  stock: vStock,
+                } = variant;
+
+                const variantQuery = `
+              INSERT INTO product_variants (
+                id, product_id, attributes, regular_price, sale_price, stock, created_at
+              ) VALUES ($1,$2,$3,$4,$5,$6,NOW());
+            `;
+
+                await pool.query(variantQuery, [
+                  variantId,
+                  item.id,
+                  attributes || {},
+                  toInt(vRegular, 0),
+                  toInt(vSale, 0),
+                  toInt(vStock, 0),
+                ]);
+              }
+            }
           }
 
           res.status(201).json({
@@ -1870,6 +1882,12 @@ ORDER BY sold DESC;
       },
     );
 
+    // Helper function
+    function toInt(value, defaultVal = 0) {
+      const n = parseInt(value);
+      return isNaN(n) ? defaultVal : n;
+    }
+
     // PUT : Update Product By ID
 
     app.put(
@@ -1877,7 +1895,8 @@ ORDER BY sold DESC;
       passport.authenticate("jwt", { session: false }),
       upload.fields([
         { name: "thumbnail", maxCount: 1 },
-        { name: "images", maxCount: 10 },
+        { name: "images", maxCount: 30 },
+        { name: "variants_images", maxCount: 30 },
       ]), // multer middleware
       async (req, res) => {
         try {
@@ -1901,9 +1920,34 @@ ORDER BY sold DESC;
             description,
             stock,
             brand,
-            extras,
+            variants,
             existingThumbnail,
           } = req.body;
+          // Insert variants with separate images
+          let parsedVariants = variants;
+
+          // FormData থেকে আসলে variants string হয়
+          if (typeof variants === "string") {
+            try {
+              parsedVariants = JSON.parse(variants);
+            } catch (e) {
+              return res.status(400).json({ message: "Invalid variants JSON" });
+            }
+          }
+          const normalizeVariant = (v) => {
+            if (v.attributes) return v;
+            const { id, tempId, regular_price, sale_price, stock, ...rest } = v;
+            return {
+              id,
+              tempId,
+              attributes: rest,
+              regular_price: regular_price || 0,
+              sale_price: sale_price || 0,
+              stock: stock || 0,
+            };
+          };
+
+          parsedVariants = parsedVariants.map(normalizeVariant);
 
           const uploadDirs = {
             image: path.join(__dirname, "uploads", "products", "images"),
@@ -1914,6 +1958,7 @@ ORDER BY sold DESC;
               "products",
               "thumbnails",
             ),
+            variants: path.join(__dirname, "uploads/products/variants_images"),
           };
 
           // create directories if not exist
@@ -1923,6 +1968,9 @@ ORDER BY sold DESC;
           // previous paths নেওয়া
           const existingPaths = req.body.existingPaths
             ? JSON.parse(req.body.existingPaths)
+            : [];
+          const oldVariantImages = req.body.existingVariantPaths
+            ? JSON.parse(req.body.existingVariantPaths)
             : [];
 
           // নতুন upload হওয়া ফাইলগুলো process
@@ -1954,9 +2002,29 @@ ORDER BY sold DESC;
               return null;
             }),
           );
+          /* -------------------- VARIANT IMAGES -------------------- */
+          const newVariantPaths = await Promise.all(
+            (req.files.variants_images || []).map(async (file, index) => {
+              if (!file.mimetype.startsWith("image/")) return null;
+
+              const filename = `${productId}-variant-${Date.now()}-${index}.webp`;
+              const filepath = path.join(uploadDirs.variants, filename);
+
+              await sharp(file.buffer)
+                .resize(800)
+                .webp({ quality: 80 })
+                .toFile(filepath);
+
+              return `/uploads/products/variants_images/${filename}`;
+            }),
+          );
 
           // merge old + new
           const savedPaths = [...newPaths, ...existingPaths].filter(Boolean);
+          const savedVariantPaths = [
+            ...oldVariantImages,
+            ...newVariantPaths,
+          ].filter(Boolean);
 
           // ✅ thumbnail handling (FIXED)
           let thumbnailPath = existingThumbnail || null;
@@ -2017,10 +2085,12 @@ ORDER BY sold DESC;
             UPDATE products SET
               product_name=$1, regular_price=$2, sale_price=$3, discount=$4, rating=$5,
               isBestSeller=$6, isHot=$7, isNew=$8, isTrending=$9, isLimitedStock=$10, isExclusive=$11, isFlashSale=$12,
-              category=$13, subcategory=$14, description=$15, stock=$16, brand=$17, images=$18, extras=$19,
-              subcategory_item=$20,
-              thumbnail=$21,
-              updatedAt=NOW()
+              category=$13, subcategory=$14, description=$15, stock=$16, brand=$17, images=$18,
+              subcategory_item=$19,
+              thumbnail=$20,
+              updatedAt=NOW(),
+                variants_images=$21
+
             WHERE id=$22;
           `;
           const values = [
@@ -2042,13 +2112,75 @@ ORDER BY sold DESC;
             stock,
             brand,
             savedPaths,
-            extras ? extras : {},
+
             subcategory_item,
             thumbnailPath, // new thumbnail
+            savedVariantPaths.length > 0 ? savedVariantPaths : null,
             productId,
           ];
 
           const result = await pool.query(query, values);
+          // Fetch existing variant IDs
+          const existingVariantsRes = await pool.query(
+            "SELECT id FROM product_variants WHERE product_id=$1",
+            [productId],
+          );
+          const existingIds = existingVariantsRes.rows.map((v) => v.id);
+
+          // Determine insert/update/delete
+          const variantsToInsert = [];
+          const variantsToUpdate = [];
+          const idsToKeep = [];
+
+          parsedVariants.forEach((v) => {
+            if (v.id && existingIds.includes(v.id)) {
+              variantsToUpdate.push(v);
+              idsToKeep.push(v.id);
+            } else {
+              variantsToInsert.push(v);
+            }
+          });
+
+          const idsToDelete = existingIds.filter(
+            (id) => !idsToKeep.includes(id),
+          );
+          if (idsToDelete.length > 0) {
+            await pool.query(
+              `DELETE FROM product_variants WHERE id = ANY($1::varchar[])`,
+              [idsToDelete],
+            );
+          }
+
+          // Update existing variants
+          for (const v of variantsToUpdate) {
+            await pool.query(
+              `UPDATE product_variants SET attributes=$1, regular_price=$2, sale_price=$3, stock=$4 WHERE id=$5`,
+              [
+                v.attributes || {},
+                toInt(v.regular_price),
+                toInt(v.sale_price),
+                toInt(v.stock),
+                v.id,
+              ],
+            );
+          }
+
+          // Insert new variants
+          for (const v of variantsToInsert) {
+            const variantId = uuidv4();
+            await pool.query(
+              `INSERT INTO product_variants (id, product_id, attributes, regular_price, sale_price, stock, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,NOW())`,
+              [
+                variantId,
+                productId,
+                v.attributes || {},
+                toInt(v.regular_price),
+                toInt(v.sale_price),
+                toInt(v.stock),
+              ],
+            );
+          }
 
           res.status(200).json({
             message: `Product updated successfully for ID: ${productId}`,
@@ -2618,8 +2750,8 @@ ORDER BY sold DESC;
         res.status(500).json({ message: error.message });
       }
     });
-    //GET: Furniture & Home Decor API Route
-    app.get("/furniture-home-decor", async (req, res) => {
+    //GET: Home & Living API Route
+    app.get("/home-living", async (req, res) => {
       try {
         const query = `
   SELECT 
@@ -2644,7 +2776,7 @@ ORDER BY sold DESC;
   LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
     ON pi->>'product_Id' = p.id
   WHERE p.isnew = $1 
-    AND p.category = 'Furniture & Home Decor'
+    AND p.category = 'Home & Living'
   GROUP BY p.id
  ORDER BY RANDOM()
   LIMIT 4;
@@ -2653,7 +2785,7 @@ ORDER BY sold DESC;
         const result = await pool.query(query, [false]);
 
         res.status(200).json({
-          message: "Furniture & Home Decor route is working!",
+          message: "Home & Living route is working!",
           products: result.rows,
         });
       } catch (error) {
@@ -2702,8 +2834,8 @@ ORDER BY sold DESC;
         res.status(500).json({ message: error.message });
       }
     });
-    //GET: Toys & Baby Products API Route
-    app.get("/toys-baby-products", async (req, res) => {
+    //GET: Toys & Kids API Route
+    app.get("/toys-kids", async (req, res) => {
       try {
         const query = `
   SELECT 
@@ -2728,7 +2860,7 @@ ORDER BY sold DESC;
   LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
     ON pi->>'product_Id' = p.id
   WHERE p.isnew = $1 
-    AND p.category = 'Toys & Baby Products'
+    AND p.category = 'Toys & Kids'
   GROUP BY p.id
  ORDER BY RANDOM()
   LIMIT 4;
@@ -2737,56 +2869,15 @@ ORDER BY sold DESC;
         const result = await pool.query(query, [false]);
 
         res.status(200).json({
-          message: "Toys & Baby Products route is working!",
+          message: "Toys & Kids route is working!",
           products: result.rows,
         });
       } catch (error) {
         res.status(500).json({ message: error.message });
       }
     });
-    //GET: Automotive & Industrial API Route
-    app.get("/automotive-industrial", async (req, res) => {
-      try {
-        const query = `
-  SELECT 
-    p.id,
-    p.product_name,
-    p.regular_price,
-    p.sale_price,
-    p.discount,
-    p.rating,
-    p.category,
-    p.isbestseller,
-    p.isnew,
-    p.images,
-    p.thumbnail,
-    p.reviews,
-    COALESCE(SUM((pi->>'qty')::INT), 0) AS sold
-  FROM products p
-  LEFT JOIN orders o
-    ON TRUE
-  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
-    ON TRUE
-  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
-    ON pi->>'product_Id' = p.id
-  WHERE p.isnew = $1 
-    AND p.category = 'Automotive & Industrial'
-  GROUP BY p.id
- ORDER BY RANDOM()
-  LIMIT 4;
-`;
 
-        const result = await pool.query(query, [false]);
-
-        res.status(200).json({
-          message: "Automotive & Industrial route is working!",
-          products: result.rows,
-        });
-      } catch (error) {
-        res.status(500).json({ message: error.message });
-      }
-    });
-    //GET: Grocery & Food Items API Route
+    //GET: Grocery & Food API Route
     app.get("/grocery-food-items", async (req, res) => {
       try {
         const query = `
@@ -2812,7 +2903,7 @@ ORDER BY sold DESC;
   LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
     ON pi->>'product_Id' = p.id
   WHERE p.isnew = $1 
-    AND p.category = 'Grocery & Food Items'
+    AND p.category = 'Grocery & Food'
   GROUP BY p.id
  ORDER BY RANDOM()
   LIMIT 4;
@@ -2821,14 +2912,14 @@ ORDER BY sold DESC;
         const result = await pool.query(query, [false]);
 
         res.status(200).json({
-          message: "Grocery & Food Items route is working!",
+          message: "Grocery & Food route is working!",
           products: result.rows,
         });
       } catch (error) {
         res.status(500).json({ message: error.message });
       }
     });
-    //GET: Pets & Pet Care API Route
+    //GET: Pet Supplies API Route
     app.get("/pets-pet-care", async (req, res) => {
       try {
         const query = `
@@ -2854,7 +2945,7 @@ ORDER BY sold DESC;
   LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
     ON pi->>'product_Id' = p.id
   WHERE p.isnew = $1 
-    AND p.category = 'Pets & Pet Care'
+    AND p.category = 'Pet Supplies'
   GROUP BY p.id
  ORDER BY RANDOM()
   LIMIT 4;
@@ -2863,7 +2954,7 @@ ORDER BY sold DESC;
         const result = await pool.query(query, [false]);
 
         res.status(200).json({
-          message: "Pets & Pet Care route is working!",
+          message: "Pet Supplies route is working!",
           products: result.rows,
         });
       } catch (error) {
@@ -3009,124 +3100,121 @@ ORDER BY sold DESC;
 
     //DELETE: Delete Flash Sale by ID
 
+    // DELETE: Entire Flash Sale
+
     app.delete("/flash-sale/:id", async (req, res) => {
+      const client = await pool.connect();
+
       try {
         const { id } = req.params;
+        await client.query("BEGIN");
 
-        // ১️⃣ আগে ফ্ল্যাশ সেল ডাটা আনা
-        const getQuery =
-          "SELECT sale_products FROM flashSaleProducts WHERE id = $1";
-        const result = await pool.query(getQuery, [id]);
+        // 1️⃣ Fetch flash sale
+        const result = await client.query(
+          "SELECT sale_products FROM flashSaleProducts WHERE id = $1",
+          [id],
+        );
 
         if (result.rowCount === 0) {
+          await client.query("ROLLBACK");
           return res.status(404).json({ message: "Flash sale not found" });
         }
 
         const saleProducts = result.rows[0].sale_products;
 
-        // ২️⃣ প্রতিটি প্রোডাক্ট স্টক restore করা
+        // 2️⃣ Restore stock
         for (const flashProd of saleProducts) {
-          const productRes = await pool.query(
-            `SELECT * FROM products WHERE id = $1`,
-            [flashProd.id],
-          );
+          const productId = flashProd.id; // ✅ FIX
 
-          if (productRes.rowCount === 0) continue;
+          // 🔹 Variant-based product
+          if (flashProd.variants && flashProd.variants.length > 0) {
+            for (const fv of flashProd.variants) {
+              await client.query(
+                `UPDATE product_variants
+             SET stock = stock + $1
+             WHERE id = $2`,
+                [Number(fv.stock) || 0, fv.id],
+              );
+            }
 
-          const mainProduct = productRes.rows[0];
+            // Update main product stock from variants
+            const totalStockRes = await client.query(
+              `SELECT COALESCE(SUM(stock),0) AS total
+           FROM product_variants
+           WHERE product_id = $1`,
+              [productId],
+            );
 
-          const mainVariants = mainProduct.extras?.variants || [];
-          const flashVariants = flashProd.extras?.variants || [];
-
-          // 👉 যদি variant থাকে
-          if (flashVariants.length > 0 && mainVariants.length > 0) {
-            const updatedVariants = mainVariants.map((v, i) => {
-              const fv = flashVariants[i];
-              return fv ? { ...v, stock: (v.stock || 0) + (fv.stock || 0) } : v;
-            });
-
-            mainProduct.extras = {
-              ...mainProduct.extras,
-              variants: updatedVariants,
-            };
-
-            mainProduct.stock = updatedVariants.reduce(
-              (sum, v) => sum + (v.stock || 0),
-              0,
+            await client.query(
+              `UPDATE products
+           SET stock = $1,
+               isflashsale = false
+           WHERE id = $2`,
+              [totalStockRes.rows[0].total, productId],
             );
           }
-          // 👉 No variant → single product
+
+          // 🔹 Single product
           else {
-            mainProduct.stock =
-              (mainProduct.stock || 0) + (flashProd.stock || 0);
+            await client.query(
+              `UPDATE products
+           SET stock = stock + $1,
+               isflashsale = false
+           WHERE id = $2`,
+              [Number(flashProd.stock) || 0, productId],
+            );
           }
 
-          mainProduct.isflashsale = false;
-
-          // ৩️⃣ প্রোডাক্ট আপডেট
-          await pool.query(
-            `UPDATE products 
-         SET stock=$1, extras=$2, isflashsale=$3 
-         WHERE id=$4`,
+          // 3️⃣ Update carts
+          await client.query(
+            `
+        UPDATE carts
+        SET productinfo = (
+          SELECT jsonb_agg(
+            CASE
+              WHEN prod->>'product_Id' = $1
+              THEN prod || jsonb_build_object(
+                'isflashsale', false,
+                'sale_price', $2::numeric,
+                'regular_price', $3::numeric
+              )
+              ELSE prod
+            END
+          )
+          FROM jsonb_array_elements(productinfo) prod
+        )
+        WHERE EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(productinfo) prod
+          WHERE prod->>'product_Id' = $1
+        )
+        `,
             [
-              mainProduct.stock,
-              JSON.stringify(mainProduct.extras || {}),
-              mainProduct.isflashsale,
-              mainProduct.id,
+              productId,
+              flashProd.sale_price || 0,
+              flashProd.regular_price || 0,
             ],
           );
-          // 🔹 Update carts: reset flash price & regular price
-          const cartsRes = await pool.query(
-            `SELECT cart_id, productinfo
-   FROM carts
-   WHERE EXISTS (
-     SELECT 1
-     FROM jsonb_array_elements(productinfo) AS prod
-     WHERE prod->>'product_Id' = $1
-   )`,
-            [mainProduct.id], // mainProduct.id string হিসেবে pass করতে হবে
-          );
-
-          const updatePromises = cartsRes.rows.map(async (cart) => {
-            const updatedProductInfo = cart.productinfo.map((prod) => {
-              if (prod.product_Id === mainProduct.id && prod.isflashsale) {
-                // mainProduct.extras.variants ধরে update
-
-                return {
-                  ...prod,
-                  isflashsale: false,
-
-                  sale_price: mainProduct.sale_price, // main product এর sale_price
-                  regular_price: mainProduct.regular_price, // main product এর regular_price
-                };
-              }
-              return prod;
-            });
-
-            const result = await pool.query(
-              `UPDATE carts SET productinfo = $1 WHERE cart_id = $2`,
-              [JSON.stringify(updatedProductInfo), cart.cartid],
-            );
-
-            return result;
-          });
-
-          await Promise.all(updatePromises);
         }
 
-        // ৪️⃣ flashSaleProducts রেকর্ড ডিলিট করা
-        await pool.query("DELETE FROM flashSaleProducts WHERE id = $1", [id]);
+        // 4️⃣ Delete flash sale
+        await client.query("DELETE FROM flashSaleProducts WHERE id = $1", [id]);
+
+        await client.query("COMMIT");
 
         res.status(200).json({
           message: "Flash sale deleted & stocks restored successfully",
         });
       } catch (error) {
+        await client.query("ROLLBACK");
         console.error(error);
         res.status(500).json({ message: error.message });
+      } finally {
+        client.release();
       }
     });
 
-    // DELETE:Delete Flash Sales Products
+    // DELETE: Delete single Flash Sale Product
     app.delete("/flash-sale/products/:id", async (req, res) => {
       const { id } = req.params;
       const client = await pool.connect();
@@ -3161,49 +3249,45 @@ ORDER BY sold DESC;
         if (productRes.rowCount > 0) {
           const mainProduct = productRes.rows[0];
 
-          const mainVariants = mainProduct.extras?.variants || [];
-          const flashVariants = flashProduct.extras?.variants || [];
+          // 3️⃣ variant update (product_variants table)
+          const variantRes = await client.query(
+            `SELECT * FROM product_variants WHERE product_id = $1`,
+            [mainProduct.id],
+          );
 
-          // 👉 Variant product
-          if (flashVariants.length && mainVariants.length) {
-            const updatedVariants = mainVariants.map((v, i) => {
-              const fv = flashVariants[i];
-              return fv ? { ...v, stock: (v.stock || 0) + (fv.stock || 0) } : v;
-            });
+          const variants = variantRes.rows;
 
-            mainProduct.extras = {
-              ...mainProduct.extras,
-              variants: updatedVariants,
-            };
+          if (variants.length && flashProduct.variants?.length) {
+            // Flash sale stock restore
+            for (const fv of flashProduct.variants) {
+              const v = variants.find((v) => v.id === fv.id);
+              if (v) {
+                await client.query(
+                  `UPDATE product_variants SET stock = $1 WHERE id = $2`,
+                  [(v.stock || 0) + (fv.stock || 0), v.id],
+                );
+              }
+            }
 
-            mainProduct.stock = updatedVariants.reduce(
-              (sum, v) => sum + (v.stock || 0),
-              0,
+            // Update main product stock = sum of variant stock
+            const totalStockRes = await client.query(
+              `SELECT COALESCE(SUM(stock),0) AS total_stock FROM product_variants WHERE product_id = $1`,
+              [mainProduct.id],
             );
-          }
-          // 👉 Single product
-          else {
+            mainProduct.stock = totalStockRes.rows[0].total_stock;
+          } else {
+            // Single product restore
             mainProduct.stock =
               (mainProduct.stock || 0) + (flashProduct.stock || 0);
           }
 
-          // 3️⃣ product update
+          // 4️⃣ main product update
           await client.query(
-            `
-        UPDATE products
-        SET stock = $1,
-            extras = $2,
-            isflashsale = false
-        WHERE id = $3
-        `,
-            [
-              mainProduct.stock,
-              JSON.stringify(mainProduct.extras || {}),
-              mainProduct.id,
-            ],
+            `UPDATE products SET stock=$1, isflashsale=false WHERE id=$2`,
+            [mainProduct.stock, mainProduct.id],
           );
 
-          // 4️⃣ carts update (⚠️ CAST FIXED)
+          // 5️⃣ carts update
           await client.query(
             `
         UPDATE carts
@@ -3235,7 +3319,7 @@ ORDER BY sold DESC;
           );
         }
 
-        // 5️⃣ flash sale থেকে product delete
+        // 6️⃣ remove product from flash sale
         await client.query(
           `
       UPDATE flashSaleProducts
@@ -3249,12 +3333,9 @@ ORDER BY sold DESC;
           [id, flashSaleId],
         );
 
-        // 6️⃣ empty flash sale delete
+        // 7️⃣ delete empty flash sales
         await client.query(
-          `
-      DELETE FROM flashSaleProducts
-      WHERE sale_products = '[]'::jsonb
-      `,
+          `DELETE FROM flashSaleProducts WHERE sale_products = '[]'::jsonb`,
         );
 
         await client.query("COMMIT");
@@ -3345,19 +3426,69 @@ ORDER BY sold DESC;
             return res.status(401).send("unauthorized access");
           }
           if (req.user.role === "seller" || req.user.role === "super admin") {
-            const query = `SELECT id, product_name, category, subcategory,subcategory_item, stock, extras
-FROM products
-WHERE seller_id = $1
-ORDER BY stock ASC;
+            const query = `
+  SELECT
+    p.id,
+    p.product_name,
+    p.category,
+    p.subcategory,
+    p.subcategory_item,
+    p.stock,
+   
+    COALESCE(
+      jsonb_agg(
+        DISTINCT jsonb_strip_nulls(
+          jsonb_build_object(
+            'id', v.id,
+            'regular_price', v.regular_price,
+            'sale_price', v.sale_price,
+            'stock', v.stock
+          ) || v.attributes
+        )
+      ) FILTER (WHERE v.id IS NOT NULL),
+      '[]'
+    ) AS variants
+  FROM products p
+  LEFT JOIN product_variants v
+    ON v.product_id = p.id
+  WHERE p.seller_id = $1
+  GROUP BY p.id
+  ORDER BY p.stock ASC;
 `;
+
             const result = await pool.query(query, [sellerId]);
             return res.status(200).json({
               message: "Return Inventory Successfully Done",
               inventory: result.rows,
             });
           } else {
-            const query =
-              "SELECT id,product_name,category,subcategory,subcategory_item,stock,extras FROM products WHERE seller_role='super admin';";
+            const query = `SELECT
+    p.id,
+    p.product_name,
+    p.category,
+    p.subcategory,
+    p.subcategory_item,
+    p.stock,
+   
+    COALESCE(
+      jsonb_agg(
+        DISTINCT jsonb_strip_nulls(
+          jsonb_build_object(
+            'id', v.id,
+            'regular_price', v.regular_price,
+            'sale_price', v.sale_price,
+            'stock', v.stock
+          ) || v.attributes
+        )
+      ) FILTER (WHERE v.id IS NOT NULL),
+      '[]'
+    ) AS variants
+  FROM products p
+  LEFT JOIN product_variants v
+    ON v.product_id = p.id
+  WHERE seller_role='super admin'
+  GROUP BY p.id
+  ORDER BY p.stock ASC;`;
             const result = await pool.query(query);
 
             return res.status(200).json({
@@ -3374,183 +3505,13 @@ ORDER BY stock ASC;
     );
 
     // PATCH: Update Inventory Products Stocks
-    // app.patch(
-    //   "/inventory/:sellerId",
-    //   passport.authenticate("jwt", { session: false }),
-    //   async (req, res) => {
-    //     try {
-    //       const { productId, variantIndex, change } = req.body;
-    //       const { sellerId } = req.params;
-
-    //       if (
-    //         !productId ||
-    //         variantIndex === undefined ||
-    //         typeof change !== "number"
-    //       ) {
-    //         return res.status(400).json({
-    //           message: "productId, variantIndex & change are required",
-    //         });
-    //       }
-
-    //       if (req.user.role === "moderator" || req.user.role === "admin") {
-    //         // Fetch product with extras
-    //         const productResult = await pool.query(
-    //           `SELECT id, seller_id, product_name, extras FROM products WHERE id = $1 AND seller_role='super admin'`,
-    //           [productId]
-    //         );
-
-    //         if (productResult.rows.length === 0) {
-    //           return res.status(404).json({ message: "Product not found" });
-    //         }
-
-    //         let { seller_id, product_name } = productResult.rows[0];
-
-    //         let extras = productResult.rows[0].extras;
-    //         let variants = extras.variants || [];
-
-    //         // Validate variant index
-    //         if (!variants[variantIndex]) {
-    //           return res.status(400).json({ message: "Invalid variant index" });
-    //         }
-
-    //         // Update stock
-    //         variants[variantIndex].stock = Math.max(
-    //           variants[variantIndex].stock + change,
-    //           0
-    //         );
-
-    //         const newStock = variants[variantIndex].stock;
-
-    //         // 🔥 Notification Logic
-    //         if (newStock === 0) {
-    //           await createNotification({
-    //             userId: seller_id,
-    //             userRole: "seller",
-    //             title: "Product Out of Stock",
-    //             message: `${product_name} has run out of stock.`,
-    //             type: "out_of_stock",
-    //             refId: productId,
-    //             refData: { variantIndex, newStock },
-    //             expiresAt: "2d",
-    //           });
-    //         } else if (newStock <= 5) {
-    //           await createNotification({
-    //             userId: seller_id,
-    //             userRole: "seller",
-    //             title: "Low Stock Warning",
-    //             message: `${product_name} stock is low. Only ${newStock} items left.`,
-    //             type: "low_stock",
-    //             refId: productId,
-    //             refData: { variantIndex, newStock },
-    //             expiresAt: "2d",
-    //           });
-    //         }
-
-    //         // Recalculate total stock
-    //         const totalStock = variants.reduce((sum, v) => sum + v.stock, 0);
-
-    //         // Update DB
-    //         const updateResult = await pool.query(
-    //           `
-    //   UPDATE products
-    //   SET extras = $1, stock = $2
-    //   WHERE id = $3
-    //   `,
-    //           [{ variants }, totalStock, productId]
-    //         );
-
-    //         return res.json({
-    //           message: "Variant & main product stock updated",
-    //           totalStock,
-    //           variants,
-    //           updatedCount: updateResult.rowCount,
-    //         });
-    //       }
-
-    //       // Fetch product with extras
-    //       const productResult = await pool.query(
-    //         `SELECT id, seller_id, product_name, extras FROM products WHERE id = $1 AND seller_id=$2`,
-    //         [productId, sellerId]
-    //       );
-
-    //       if (productResult.rows.length === 0) {
-    //         return res.status(404).json({ message: "Product not found" });
-    //       }
-
-    //       let { seller_id, product_name } = productResult.rows[0];
-
-    //       let extras = productResult.rows[0].extras;
-    //       let variants = extras.variants || [];
-
-    //       // Validate variant index
-    //       if (!variants[variantIndex]) {
-    //         return res.status(400).json({ message: "Invalid variant index" });
-    //       }
-
-    //       // Update stock
-    //       variants[variantIndex].stock = Math.max(
-    //         variants[variantIndex].stock + change,
-    //         0
-    //       );
-
-    //       const newStock = variants[variantIndex].stock;
-
-    //       // 🔥 Notification Logic
-    //       if (newStock === 0) {
-    //         await createNotification({
-    //           userId: seller_id,
-    //           userRole: "seller",
-    //           title: "Product Out of Stock",
-    //           message: `${product_name} has run out of stock.`,
-    //           type: "out_of_stock",
-    //           refId: productId,
-    //           refData: { variantIndex, newStock },
-    //           expiresAt: "2d",
-    //         });
-    //       } else if (newStock <= 5) {
-    //         await createNotification({
-    //           userId: seller_id,
-    //           userRole: "seller",
-    //           title: "Low Stock Warning",
-    //           message: `${product_name} stock is low. Only ${newStock} items left.`,
-    //           type: "low_stock",
-    //           refId: productId,
-    //           refData: { variantIndex, newStock },
-    //           expiresAt: "2d",
-    //         });
-    //       }
-
-    //       // Recalculate total stock
-    //       const totalStock = variants.reduce((sum, v) => sum + v.stock, 0);
-
-    //       // Update DB
-    //       const updateResult = await pool.query(
-    //         `
-    //   UPDATE products
-    //   SET extras = $1, stock = $2
-    //   WHERE id = $3
-    //   `,
-    //         [{ variants }, totalStock, productId]
-    //       );
-
-    //       res.json({
-    //         message: "Variant & main product stock updated",
-    //         totalStock,
-    //         variants,
-    //         updatedCount: updateResult.rowCount,
-    //       });
-    //     } catch (error) {
-    //       res.status(500).json({ message: error.message });
-    //     }
-    //   }
-    // );
 
     app.patch(
       "/inventory/:sellerId",
       passport.authenticate("jwt", { session: false }),
       async (req, res) => {
         try {
-          const { productId, variantIndex, change } = req.body;
+          const { productId, variantId, change } = req.body;
           const { sellerId } = req.params;
 
           if (!productId || typeof change !== "number") {
@@ -3562,36 +3523,28 @@ ORDER BY stock ASC;
           const isModerator =
             req.user.role === "moderator" || req.user.role === "admin";
 
+          // Fetch product
           const productQuery = isModerator
-            ? `SELECT id, seller_id, product_name, extras, stock
-           FROM products
-           WHERE id = $1 AND seller_role='super admin'`
-            : `SELECT id, seller_id, product_name, extras, stock
-           FROM products
-           WHERE id = $1 AND seller_id = $2`;
+            ? `SELECT id, seller_id, product_name, stock FROM products WHERE id = $1`
+            : `SELECT id, seller_id, product_name, stock FROM products WHERE id = $1 AND seller_id = $2`;
 
           const productResult = await pool.query(
             productQuery,
             isModerator ? [productId] : [productId, sellerId],
           );
 
-          if (productResult.rows.length === 0) {
+          if (productResult.rows.length === 0)
             return res.status(404).json({ message: "Product not found" });
-          }
 
-          let { seller_id, product_name, extras, stock } =
-            productResult.rows[0];
-
-          extras = extras || {};
-          let variants = extras.variants || [];
+          const { seller_id, product_name, stock } = productResult.rows[0];
 
           /** ------------------------------------------------
-           * 🔹 CASE 1: NO VARIANTS → update main stock only
+           * 🔹 CASE 1: No variant → update main product stock
            * ------------------------------------------------*/
-          if (!variants.length || variantIndex === undefined) {
+          if (!variantId) {
             const newStock = Math.max(stock + change, 0);
 
-            // 🔔 Notifications
+            // Notifications
             if (newStock === 0) {
               await createNotification({
                 userId: seller_id,
@@ -3629,29 +3582,51 @@ ORDER BY stock ASC;
           }
 
           /** ------------------------------------------------
-           * 🔹 CASE 2: VARIANTS EXIST → update variant stock
+           * 🔹 CASE 2: Variant exists → update variant stock
            * ------------------------------------------------*/
-          if (!variants[variantIndex]) {
-            return res.status(400).json({ message: "Invalid variant index" });
-          }
-
-          variants[variantIndex].stock = Math.max(
-            variants[variantIndex].stock + change,
-            0,
+          const variantResult = await pool.query(
+            `SELECT id, product_id, attributes, regular_price, sale_price, stock
+         FROM product_variants
+         WHERE id = $1 AND product_id = $2`,
+            [variantId, productId],
           );
 
-          const newVariantStock = variants[variantIndex].stock;
+          if (variantResult.rows.length === 0)
+            return res.status(404).json({ message: "Variant not found" });
 
-          // 🔔 Notifications
+          const variant = variantResult.rows[0];
+          const newVariantStock = Math.max(variant.stock + change, 0);
+
+          // Update variant stock
+          await pool.query(
+            `UPDATE product_variants SET stock = $1 WHERE id = $2`,
+            [newVariantStock, variantId],
+          );
+
+          // Calculate total stock across all variants
+          const totalStockResult = await pool.query(
+            `SELECT COALESCE(SUM(stock),0) as total_stock FROM product_variants WHERE product_id = $1`,
+            [productId],
+          );
+
+          const totalStock = totalStockResult.rows[0].total_stock;
+
+          // Update products.stock for reference
+          await pool.query(`UPDATE products SET stock = $1 WHERE id = $2`, [
+            totalStock,
+            productId,
+          ]);
+
+          // Notifications
           if (newVariantStock === 0) {
             await createNotification({
               userId: seller_id,
               userRole: "seller",
               title: "Product Out of Stock",
-              message: `${product_name} has run out of stock.`,
+              message: `${product_name} variant is out of stock.`,
               type: "out_of_stock",
               refId: productId,
-              refData: { variantIndex, newStock: newVariantStock },
+              refData: { variantId, newStock: newVariantStock },
               expiresAt: "2d",
             });
           } else if (newVariantStock <= 5) {
@@ -3659,30 +3634,19 @@ ORDER BY stock ASC;
               userId: seller_id,
               userRole: "seller",
               title: "Low Stock Warning",
-              message: `${product_name} stock is low. Only ${newVariantStock} items left.`,
+              message: `${product_name} variant stock is low. Only ${newVariantStock} items left.`,
               type: "low_stock",
               refId: productId,
-              refData: { variantIndex, newStock: newVariantStock },
+              refData: { variantId, newStock: newVariantStock },
               expiresAt: "2d",
             });
           }
 
-          const totalStock = variants.reduce((sum, v) => sum + v.stock, 0);
-
-          const updateResult = await pool.query(
-            `
-        UPDATE products
-        SET extras = $1, stock = $2
-        WHERE id = $3
-        `,
-            [{ ...extras, variants }, totalStock, productId],
-          );
-
           res.json({
             message: "Variant & total stock updated",
+            variantId,
+            newVariantStock,
             totalStock,
-            variants,
-            updatedCount: updateResult.rowCount,
           });
         } catch (error) {
           res.status(500).json({ message: error.message });
@@ -3691,7 +3655,6 @@ ORDER BY stock ASC;
     );
 
     // PATCH: Update Inventory All Products Stocks
-
     app.patch(
       "/inventory/all-variants/:sellerId",
       passport.authenticate("jwt", { session: false }),
@@ -3704,190 +3667,86 @@ ORDER BY stock ASC;
             return res.status(400).json({ message: "Invalid change value" });
           }
 
-          if (req.user.role === "moderator" || req.user.role === "admin") {
-            const { rows: products } = await pool.query(
-              "SELECT id, seller_id, product_name, extras, stock FROM products WHERE seller_role='super admin' AND id=$1",
-              [productId],
-            );
+          // Moderator / admin check
+          const isModerator =
+            req.user.role === "moderator" || req.user.role === "admin";
 
-            let updateCount = 0;
+          const productQuery = isModerator
+            ? "SELECT id, seller_id, product_name, stock FROM products WHERE seller_role='super admin' AND id=$1"
+            : "SELECT id, seller_id, product_name, stock FROM products WHERE seller_id=$1 AND id=$2";
 
-            for (let product of products) {
-              let extras = product.extras || {};
-              let variants = extras.variants || [];
-              let totalStock = product.stock;
-
-              if (variants.length > 0) {
-                // Update variant stocks
-                variants = variants.map((v, index) => {
-                  const newStock = Math.max((v.stock || 0) + change, 0);
-
-                  if (newStock === 0) {
-                    createNotification({
-                      userId: product.seller_id,
-                      userRole: "seller",
-                      title: "Product Out of Stock",
-                      message: `${product.product_name} is OUT OF STOCK.`,
-                      type: "out_of_stock",
-                      refId: product.id,
-                      refData: { variantIndex: index, newStock },
-                      expiresAt: "2d",
-                    });
-                  } else if (newStock <= 5) {
-                    createNotification({
-                      userId: product.seller_id,
-                      userRole: "seller",
-                      title: "Low Stock Warning",
-                      message: `${product.product_name} LOW STOCK: Only ${newStock} left.`,
-                      type: "low_stock",
-                      refId: product.id,
-                      refData: { variantIndex: index, newStock },
-                      expiresAt: "2d",
-                    });
-                  }
-
-                  return { ...v, stock: newStock };
-                });
-
-                totalStock = variants.reduce(
-                  (sum, v) => sum + (v.stock || 0),
-                  0,
-                );
-                extras.variants = variants;
-              } else {
-                // No variants, update main stock
-                totalStock = Math.max(product.stock + change, 0);
-
-                if (totalStock === 0) {
-                  createNotification({
-                    userId: product.seller_id,
-                    userRole: "seller",
-                    title: "Product Out of Stock",
-                    message: `${product.product_name} is OUT OF STOCK.`,
-                    type: "out_of_stock",
-                    refId: product.id,
-                    refData: { newStock: totalStock },
-                    expiresAt: "7d",
-                  });
-                } else if (totalStock <= 5) {
-                  createNotification({
-                    userId: product.seller_id,
-                    userRole: "seller",
-                    title: "Low Stock Warning",
-                    message: `${product.product_name} LOW STOCK: Only ${totalStock} left.`,
-                    type: "low_stock",
-                    refId: product.id,
-                    refData: { newStock: totalStock },
-                    expiresAt: "7d",
-                  });
-                }
-              }
-
-              // Save update in DB
-              await pool.query(
-                `UPDATE products SET extras=$1, stock=$2 WHERE id=$3`,
-                [extras, totalStock, product.id],
-              );
-
-              updateCount++;
-            }
-
-            return res.json({
-              updated: true,
-              updatedProducts: updateCount,
-              message: "All stocks updated successfully",
-            });
-          }
-
-          // Load products
-          const { rows: products } = await pool.query(
-            "SELECT id, seller_id, product_name, extras, stock FROM products WHERE seller_id=$1 AND id=$2",
-            [sellerId, productId],
+          const productResult = await pool.query(
+            productQuery,
+            isModerator ? [productId] : [sellerId, productId],
           );
 
-          let updateCount = 0;
+          if (!productResult.rows.length) {
+            return res.status(404).json({ message: "Product not found" });
+          }
 
-          for (let product of products) {
-            let extras = product.extras || {};
-            let variants = extras.variants || [];
-            let totalStock = product.stock;
+          const product = productResult.rows[0];
 
-            if (variants.length > 0) {
-              // Update variant stocks
-              variants = variants.map((v, index) => {
-                const newStock = Math.max((v.stock || 0) + change, 0);
+          // Fetch all variants for this product
+          const { rows: variants } = await pool.query(
+            "SELECT id, stock FROM product_variants WHERE product_id=$1",
+            [productId],
+          );
 
-                if (newStock === 0) {
-                  createNotification({
-                    userId: product.seller_id,
-                    userRole: "seller",
-                    title: "Product Out of Stock",
-                    message: `${product.product_name} is OUT OF STOCK.`,
-                    type: "out_of_stock",
-                    refId: product.id,
-                    refData: { variantIndex: index, newStock },
-                    expiresAt: "7d",
-                  });
-                } else if (newStock <= 5) {
-                  createNotification({
-                    userId: product.seller_id,
-                    userRole: "seller",
-                    title: "Low Stock Warning",
-                    message: `${product.product_name} LOW STOCK: Only ${newStock} left.`,
-                    type: "low_stock",
-                    refId: product.id,
-                    refData: { variantIndex: index, newStock },
-                    expiresAt: "7d",
-                  });
-                }
+          // Update variant stocks
+          const updatedVariants = await Promise.all(
+            variants.map(async (v) => {
+              const newStock = Math.max((v.stock || 0) + change, 0);
 
-                return { ...v, stock: newStock };
-              });
-
-              totalStock = variants.reduce((sum, v) => sum + (v.stock || 0), 0);
-              extras.variants = variants;
-            } else {
-              // No variants, update main stock
-              totalStock = Math.max(product.stock + change, 0);
-
-              if (totalStock === 0) {
-                createNotification({
+              // Notifications
+              if (newStock === 0) {
+                await createNotification({
                   userId: product.seller_id,
                   userRole: "seller",
-                  title: "Product Out of Stock",
-                  message: `${product.product_name} is OUT OF STOCK.`,
+                  title: "Variant Out of Stock",
+                  message: `Variant ${v.id} of ${product.product_name} is OUT OF STOCK.`,
                   type: "out_of_stock",
-                  refId: product.id,
-                  refData: { newStock: totalStock },
-                  expiresAt: "7d",
+                  refId: productId,
+                  refData: { variantId: v.id, newStock },
+                  expiresAt: "2d",
                 });
-              } else if (totalStock <= 5) {
-                createNotification({
+              } else if (newStock <= 5) {
+                await createNotification({
                   userId: product.seller_id,
                   userRole: "seller",
                   title: "Low Stock Warning",
-                  message: `${product.product_name} LOW STOCK: Only ${totalStock} left.`,
+                  message: `Variant ${v.id} of ${product.product_name} LOW STOCK: Only ${newStock} left.`,
                   type: "low_stock",
-                  refId: product.id,
-                  refData: { newStock: totalStock },
-                  expiresAt: "7d",
+                  refId: productId,
+                  refData: { variantId: v.id, newStock },
+                  expiresAt: "2d",
                 });
               }
-            }
 
-            // Save update in DB
-            await pool.query(
-              `UPDATE products SET extras=$1, stock=$2 WHERE id=$3`,
-              [extras, totalStock, product.id],
-            );
+              // Update DB
+              await pool.query(
+                "UPDATE product_variants SET stock=$1 WHERE id=$2",
+                [newStock, v.id],
+              );
 
-            updateCount++;
-          }
+              return { ...v, stock: newStock };
+            }),
+          );
+
+          // Update main product total stock
+          const totalStock = updatedVariants.reduce(
+            (sum, v) => sum + v.stock,
+            0,
+          );
+          await pool.query("UPDATE products SET stock=$1 WHERE id=$2", [
+            totalStock,
+            productId,
+          ]);
 
           res.json({
             updated: true,
-            updatedProducts: updateCount,
-            message: "All stocks updated successfully",
+            totalStock,
+            updatedVariants,
+            message: "All variant stocks updated successfully",
           });
         } catch (err) {
           res.status(500).json({ message: err.message });
@@ -4547,52 +4406,52 @@ ORDER BY stock ASC;
           { expiresIn: "7d" },
         );
 
-        res
-          .clearCookie("Token", {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            path: "/",
-            maxAge: 0,
-          })
-          .clearCookie("RefreshToken", {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            path: "/",
-            maxAge: 0,
-          });
+        // res
+        //   .clearCookie("Token", {
+        //     httpOnly: true,
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
+        //     path: "/",
+        //     maxAge: 0,
+        //   })
+        //   .clearCookie("RefreshToken", {
+        //     httpOnly: true,
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
+        //     path: "/",
+        //     maxAge: 0,
+        //   });
 
-        res.cookie("Token", newAccessToken, {
-          httpOnly: true,
-          secure: true,
-          sameSite: "None",
-          domain: ".bazarigo.com",
-          maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        });
-
-        // Clear old cookies
-        // res.clearCookie("Token", {
-        //   httpOnly: true,
-        //   sameSite: "Strict",
-        //   maxAge: 0,
-        // });
-
-        // res.clearCookie("RefreshToken", {
-        //   httpOnly: true,
-        //   sameSite: "Strict",
-        //   maxAge: 0,
-        // });
-
-        // // Set new access token
         // res.cookie("Token", newAccessToken, {
         //   httpOnly: true,
-        //   secure: false,
-        //   sameSite: "Strict",
+        //   secure: true,
+        //   sameSite: "None",
+        //   domain: ".bazarigo.com",
         //   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         // });
+
+        // Clear old cookies
+        res.clearCookie("Token", {
+          httpOnly: true,
+          sameSite: "Strict",
+          maxAge: 0,
+        });
+
+        res.clearCookie("RefreshToken", {
+          httpOnly: true,
+          sameSite: "Strict",
+          maxAge: 0,
+        });
+
+        // Set new access token
+        res.cookie("Token", newAccessToken, {
+          httpOnly: true,
+          secure: false,
+          sameSite: "Strict",
+          maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        });
 
         res.json({ message: "Access token refreshed" });
       } catch (err) {
@@ -4631,38 +4490,38 @@ ORDER BY stock ASC;
           },
         );
 
-        res
-          .cookie("Token", accessToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-          })
-          .cookie("RefreshToken", refreshToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-          })
-          .redirect(`${process.env.BASEURL}${redirectPath}`);
-
-        // Set new access token
         // res
         //   .cookie("Token", accessToken, {
         //     httpOnly: true,
-        //     secure: false,
-        //     sameSite: "Strict",
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
         //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         //   })
         //   .cookie("RefreshToken", refreshToken, {
         //     httpOnly: true,
-        //     secure: false,
-        //     sameSite: "Strict",
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
         //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
         //   })
         //   .redirect(`${process.env.BASEURL}${redirectPath}`);
+
+        // Set new access token
+        res
+          .cookie("Token", accessToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "Strict",
+            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+          })
+          .cookie("RefreshToken", refreshToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "Strict",
+            maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+          })
+          .redirect(`${process.env.BASEURL}${redirectPath}`);
       },
     );
     // POST: Create Users API Route
@@ -5262,39 +5121,19 @@ ORDER BY stock ASC;
           },
         );
 
-        res
-          .cookie("Token", accessToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-          })
-          .cookie("RefreshToken", refreshToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-          })
-          .status(200)
-          .json({
-            message: "Login successful",
-            login: true,
-            role,
-          });
-
         // res
         //   .cookie("Token", accessToken, {
         //     httpOnly: true,
-        //     secure: false,
-        //     sameSite: "Strict",
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
         //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         //   })
         //   .cookie("RefreshToken", refreshToken, {
         //     httpOnly: true,
-        //     secure: false,
-        //     sameSite: "Strict",
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
         //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
         //   })
         //   .status(200)
@@ -5303,6 +5142,26 @@ ORDER BY stock ASC;
         //     login: true,
         //     role,
         //   });
+
+        res
+          .cookie("Token", accessToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "Strict",
+            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+          })
+          .cookie("RefreshToken", refreshToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "Strict",
+            maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+          })
+          .status(200)
+          .json({
+            message: "Login successful",
+            login: true,
+            role,
+          });
       } catch (err) {
         res.status(500).json({ message: err.message });
       }
@@ -5377,37 +5236,21 @@ ORDER BY stock ASC;
     );
     // Logout Route
     app.post("/logout", (req, res) => {
-      res
-        .clearCookie("Token", {
-          httpOnly: true,
-          secure: true,
-          sameSite: "None",
-          domain: ".bazarigo.com",
-          path: "/",
-          maxAge: 0,
-        })
-        .clearCookie("RefreshToken", {
-          httpOnly: true,
-          secure: true,
-          sameSite: "None",
-          domain: ".bazarigo.com",
-          path: "/",
-          maxAge: 0,
-        })
-        .status(200)
-        .json({
-          message: "logout success",
-          logOut: true,
-        });
       // res
       //   .clearCookie("Token", {
       //     httpOnly: true,
-      //     sameSite: "Strict",
+      //     secure: true,
+      //     sameSite: "None",
+      //     domain: ".bazarigo.com",
+      //     path: "/",
       //     maxAge: 0,
       //   })
       //   .clearCookie("RefreshToken", {
       //     httpOnly: true,
-      //     sameSite: "Strict",
+      //     secure: true,
+      //     sameSite: "None",
+      //     domain: ".bazarigo.com",
+      //     path: "/",
       //     maxAge: 0,
       //   })
       //   .status(200)
@@ -5415,6 +5258,22 @@ ORDER BY stock ASC;
       //     message: "logout success",
       //     logOut: true,
       //   });
+      res
+        .clearCookie("Token", {
+          httpOnly: true,
+          sameSite: "Strict",
+          maxAge: 0,
+        })
+        .clearCookie("RefreshToken", {
+          httpOnly: true,
+          sameSite: "Strict",
+          maxAge: 0,
+        })
+        .status(200)
+        .json({
+          message: "logout success",
+          logOut: true,
+        });
     });
 
     // Forget Password
@@ -6687,17 +6546,20 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
         const { payload, promoCode, userId, paymentPayload } = req.body;
         const orderId = generateId("ODR");
 
+        // Flatten all order items
         const orderdProducts = payload.orderItems.flatMap((item) =>
           item.productinfo.map((prod) => ({
             product_id: prod.product_Id,
-            variants: prod.variants,
+            variant_id: prod.variants.id, // সরাসরি variant id
             qty: prod.qty,
             isflashsale: prod.isflashsale,
             sellerid: item.sellerid,
           })),
         );
 
-        // ফাংশন: Flash Sale Stock Update
+        // =============================
+        // Flash Sale Stock Update
+        // =============================
         const updateFlashSaleStock = async (item) => {
           const now = Math.floor(Date.now() / 1000);
           const flashRes = await client.query(
@@ -6711,52 +6573,43 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
 
           for (const sp of flashSale.sale_products) {
             if (sp.id !== item.product_id) continue;
-            const variantsArr = sp.extras?.variants || [];
-            const variantIndex = variantsArr.findIndex((v) =>
-              Object.keys(item.variants).every(
-                (k) => v[k] === item.variants[k],
-              ),
-            );
-            if (variantIndex === -1) continue;
+            if (!sp.variants?.length) continue;
 
-            variantsArr[variantIndex].stock = Math.max(
-              variantsArr[variantIndex].stock - item.qty,
-              0,
-            );
-            sp.stock = variantsArr.reduce((sum, v) => sum + (v.stock || 0), 0);
+            const variant = sp.variants.find((v) => v.id === item.variant_id);
+            if (!variant) continue;
+
+            variant.stock = Math.max((variant.stock || 0) - item.qty, 0);
+            sp.stock = sp.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
             updated = true;
             break;
           }
 
           if (updated) {
             await client.query(
-              `UPDATE flashSaleProducts SET sale_products = $1 WHERE id = $2`,
+              `UPDATE flashSaleProducts SET sale_products=$1 WHERE id=$2`,
               [JSON.stringify(flashSale.sale_products), flashSale.id],
             );
           }
         };
 
-        // ফাংশন: Normal Product Stock Update + Notifications
+        // =============================
+        // Normal Product Stock Update + Notifications
+        // =============================
         const updateNormalStock = async (item) => {
-          const productRes = await client.query(
-            `SELECT id, seller_id, product_name, extras FROM products WHERE id = $1`,
-            [item.product_id],
+          const variantRes = await client.query(
+            `SELECT id, product_id, stock, regular_price, sale_price FROM product_variants WHERE id=$1`,
+            [item.variant_id],
           );
-          if (!productRes.rows.length) return;
+          if (!variantRes.rows.length) return;
 
-          let { seller_id, product_name, extras } = productRes.rows[0];
-          let variants = extras.variants || [];
+          const variant = variantRes.rows[0];
+          const newStock = Math.max((variant.stock || 0) - item.qty, 0);
 
-          const variantIndex = variants.findIndex((v) =>
-            Object.keys(item.variants).every((k) => v[k] === item.variants[k]),
+          // Update variant stock
+          await client.query(
+            `UPDATE product_variants SET stock=$1 WHERE id=$2`,
+            [newStock, variant.id],
           );
-          if (variantIndex === -1) return;
-
-          variants[variantIndex].stock = Math.max(
-            variants[variantIndex].stock - item.qty,
-            0,
-          );
-          const newStock = variants[variantIndex].stock;
 
           // Notification
           const notifications = [];
@@ -6764,38 +6617,48 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
           else if (newStock <= 5) notifications.push({ type: "low_stock" });
 
           if (notifications.length) {
+            const productRes = await client.query(
+              `SELECT product_name, seller_id FROM products WHERE id=$1`,
+              [variant.product_id],
+            );
+            const product = productRes.rows[0];
+
             await Promise.all(
               notifications.map((n) =>
                 createNotification({
-                  userId: seller_id,
+                  userId: product.seller_id,
                   userRole: "seller",
                   title:
                     n.type === "out_of_stock"
                       ? "Product Out of Stock"
                       : "Low Stock Warning",
-                  message: `${product_name} (${JSON.stringify(
-                    item.variants,
-                  )}) ${
+                  message: `${product.product_name} (Variant ${variant.id}) ${
                     n.type === "out_of_stock"
                       ? "is now OUT OF STOCK."
                       : "stock is low. Only " + newStock + " left."
                   }`,
                   type: n.type,
-                  refId: item.product_id,
+                  refId: variant.product_id,
                   expiresAt: "7d",
                 }),
               ),
             );
           }
 
-          const totalStock = variants.reduce((sum, v) => sum + v.stock, 0);
-          await client.query(
-            `UPDATE products SET extras = $1, stock = $2 WHERE id = $3`,
-            [{ variants }, totalStock, item.product_id],
+          // Update main product stock = sum of all variants
+          const totalStockRes = await client.query(
+            `SELECT COALESCE(SUM(stock),0) AS total_stock FROM product_variants WHERE product_id=$1`,
+            [variant.product_id],
           );
+          const totalStock = totalStockRes.rows[0].total_stock;
+
+          await client.query(`UPDATE products SET stock=$1 WHERE id=$2`, [
+            totalStock,
+            variant.product_id,
+          ]);
         };
 
-        // Stock update for all products concurrently
+        // Update all products concurrently
         await Promise.all(
           orderdProducts.map((item) =>
             item.isflashsale
@@ -6804,8 +6667,17 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
           ),
         );
 
+        // =============================
         // Insert order
-        const query = `INSERT INTO orders (order_id,order_date,payment_method,payment_status,customer_id,customer_name,customer_email,customer_phone,customer_address,order_items,subtotal,delivery_cost,total) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *;`;
+        // =============================
+        const query = `
+      INSERT INTO orders (
+        order_id, order_date, payment_method, payment_status,
+        customer_id, customer_name, customer_email, customer_phone,
+        customer_address, order_items, subtotal, delivery_cost, total
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      RETURNING *;
+    `;
         const values = [
           orderId,
           payload.orderDate,
@@ -6823,7 +6695,9 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
         ];
         const result = await client.query(query, values);
 
-        // Promo code handling
+        // =============================
+        // Promo code
+        // =============================
         if (promoCode) {
           const promoRes = await client.query(
             `SELECT id FROM promotions WHERE code=$1`,
@@ -6837,41 +6711,39 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
           }
         }
 
+        // =============================
+        // Cart cleanup
+        // =============================
         const cartPromises = payload.orderItems.map(async (item) => {
           const productIdsToRemove = item.productinfo.map((p) => p.product_Id);
-
-          // productinfo থেকে remove করা
           const updateRes = await client.query(
             `
-      UPDATE carts
-      SET productinfo = (
-        SELECT COALESCE(jsonb_agg(p), '[]'::jsonb)
-        FROM jsonb_array_elements(productinfo) p
-        WHERE NOT (p->>'product_Id' = ANY($1::text[]))
-      )
-      WHERE cart_id = $2 AND user_email = $3
-      RETURNING productinfo
+        UPDATE carts
+        SET productinfo = (
+          SELECT COALESCE(jsonb_agg(p), '[]'::jsonb)
+          FROM jsonb_array_elements(productinfo) p
+          WHERE NOT (p->>'product_Id' = ANY($1::text[]))
+        )
+        WHERE cart_id = $2 AND user_email = $3
+        RETURNING productinfo
       `,
             [productIdsToRemove, item.cart_id, item.user_email],
           );
 
           const remainingProducts = updateRes.rows[0]?.productinfo || [];
-
-          // যদি productinfo খালি, cart delete
-          if (remainingProducts.length === 0) {
+          if (!remainingProducts.length) {
             return await client.query(
-              `DELETE FROM carts WHERE cart_id = $1 AND user_email = $2`,
+              `DELETE FROM carts WHERE cart_id=$1 AND user_email=$2`,
               [item.cart_id, item.user_email],
             );
           }
         });
 
-        // সব cart একসাথে process
         await Promise.all(cartPromises);
-        console.log("All carts processed successfully.");
 
-        // Payment insert
-
+        // =============================
+        // Payment
+        // =============================
         const paymentId = uuidv4();
         await client.query(
           `INSERT INTO payments (id,order_id,payment_date,amount,payment_method,status,phone_number) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
@@ -6886,18 +6758,19 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
           ],
         );
 
-        // Seller notifications
+        // =============================
+        // Seller Notifications
+        // =============================
         await Promise.all(
           result.rows[0].order_items.map(async (item) => {
             const getSeller = await client.query(
               `
-        SELECT id,role FROM admins WHERE id = $1
-        UNION
-        SELECT id,role FROM sellers WHERE id = $1
-      `,
+          SELECT id, role FROM admins WHERE id=$1
+          UNION
+          SELECT id, role FROM sellers WHERE id=$1
+        `,
               [item.sellerid],
             );
-
             const seller = getSeller.rows[0];
             await createNotification({
               userId: seller.id,
@@ -6911,36 +6784,8 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
           }),
         );
 
-        if (result.rowCount > 0) {
-          await sendEmail(
-            process.env.SUPER_ADMIN,
-            `New Order Received - ${orderId}`,
-            `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin:auto; padding:20px; background:#f9f9f9; border-radius:10px;">
-  <h2 style="color:#FF0055; text-align:center;">Bazarigo</h2>
-
-  <p><strong>A new order has been placed.</strong></p>
-
-  <table style="width:100%; margin-top:15px;">
-    <tr><td><strong>Order ID</strong></td><td>${orderId}</td></tr>
-    <tr><td><strong>Customer</strong></td><td>${payload.customerName}</td></tr>
-    <tr><td><strong>Email</strong></td><td>${payload.customerEmail}</td></tr>
-    <tr><td><strong>Phone</strong></td><td>${payload.customerPhone}</td></tr>
-    <tr><td><strong>Total</strong></td><td>৳ ${payload.total}</td></tr>
-  </table>
-
-  <p style="margin-top:20px;">Please check admin panel for full details.</p>
-
-  <hr />
-  <p style="font-size:12px; text-align:center; color:#777;">
-    © ${new Date().getFullYear()} Bazarigo
-  </p>
-</div>
-`,
-          );
-        }
-
         await client.query("COMMIT");
+
         res.status(201).json({
           message: "Order created successfully",
           createdCount: result.rowCount,
@@ -7197,9 +7042,9 @@ WHERE customer_email = $1;
     app.patch("/orders/status/:id", async (req, res) => {
       try {
         const { id } = req.params;
-        const { order_status, prodId } = req.body;
+        const { order_status, prodId, variantId } = req.body;
 
-        const orderQuery = `SELECT customer_id,order_items FROM orders WHERE order_id=$1`;
+        const orderQuery = `SELECT customer_id, order_items FROM orders WHERE order_id=$1`;
         const orderRes = await pool.query(orderQuery, [id]);
 
         if (!orderRes.rows.length) {
@@ -7207,350 +7052,112 @@ WHERE customer_email = $1;
         }
 
         const orderItems = orderRes.rows[0].order_items;
+        const customerId = orderRes.rows[0].customer_id;
+
         let returnedQty = 0;
 
-        // 2️⃣ Get customer info + reason from return_requests (only if returned)
-        let returnReason = "";
-        let customerId = null;
-        let customerName = "";
-        let images = [];
+        // ----------------------------
+        // Returned or Cancelled logic
+        // ----------------------------
+        if (["Returned", "Cancelled"].includes(order_status)) {
+          // Find the product in the order
+          const productData = orderItems.flatMap((item) =>
+            item.productinfo.filter((p) => p.product_Id === prodId),
+          )[0];
 
-        switch (order_status) {
-          case "Returned": {
-            const selectedItem = orderItems.map((item) => {
-              const selectProd = item.productinfo.find(
-                (prod) => prod.product_Id === prodId,
-              );
-              return {
-                name: selectProd.product_name,
-              };
-            });
+          if (!productData) {
+            return res
+              .status(404)
+              .json({ message: "Product not found in the order" });
+          }
 
-            if (!selectedItem) {
-              return res
-                .status(404)
-                .json({ message: "Product not found in order" });
-            }
-            // 2️⃣ Get return info
-            const reasonQuery = `
-    SELECT *
-    FROM return_requests
-    WHERE order_id=$1 AND product_name=$2
-  `;
-            const reasonRes = await pool.query(reasonQuery, [
-              id,
-              selectedItem[0].name,
+          returnedQty = productData.qty;
+
+          // Update variant stock directly
+          const variantRes = await pool.query(
+            `SELECT id, stock, product_id FROM product_variants WHERE id=$1`,
+            [variantId || productData.variants.id],
+          );
+          if (variantRes.rows.length) {
+            const variant = variantRes.rows[0];
+            const newStock = (variant.stock || 0) + returnedQty;
+
+            await pool.query(
+              `UPDATE product_variants SET stock=$1 WHERE id=$2`,
+              [newStock, variant.id],
+            );
+
+            // Update main product stock = sum of all variants
+            const totalStockRes = await pool.query(
+              `SELECT COALESCE(SUM(stock),0) AS total_stock FROM product_variants WHERE product_id=$1`,
+              [variant.product_id],
+            );
+            const totalStock = totalStockRes.rows[0].total_stock;
+            await pool.query(`UPDATE products SET stock=$1 WHERE id=$2`, [
+              totalStock,
+              variant.product_id,
             ]);
-
-            if (reasonRes.rows.length) {
-              returnReason = reasonRes.rows[0].reason;
-              customerId = reasonRes.rows[0].customer_id;
-              customerName = reasonRes.rows[0].customer_name;
-              images = reasonRes.rows[0].images;
-            }
-
-            const returnProduct = await pool.query(
-              "SELECT extras,stock FROM products WHERE id=$1",
-              [prodId],
-            );
-            const productRow = returnProduct.rows[0];
-            const extras = productRow.extras || {};
-            const variants = extras.variants || [];
-
-            const returnOrderProduct = orderItems.map((item) => {
-              const returnProd = item.productinfo.find(
-                (prod) => prod.product_Id === prodId,
-              );
-              return {
-                ...returnProd,
-                order_status: order_status,
-                product_img: images,
-                seller_name: item.seller_name,
-                seller_role: item.seller_role,
-                sellerid: item.sellerid,
-                seller_store_name: item.seller_store_name,
-                returnReason: returnReason || "No reason provided",
-              };
-            })[0];
-
-            const updatedOrderItems = orderItems
-              .map((item) => {
-                const updatedProds = item.productinfo.filter(
-                  (prod) => prod.product_Id !== prodId,
-                );
-                return { ...item, productinfo: updatedProds };
-              })
-              .filter((item) => item.productinfo.length > 0);
-
-            const returnOrderProductVariantId = returnOrderProduct.variants.id;
-            returnedQty = returnOrderProduct.qty;
-
-            const updatedVariants = variants.map((variant) => {
-              if (variant.id === returnOrderProductVariantId) {
-                return { ...variant, stock: variant.stock + returnedQty };
-              }
-              return variant;
-            });
-
-            const totalStock = updatedVariants.reduce(
-              (sum, variant) => sum + (Number(variant.stock) || 0),
-              0,
-            );
-
-            await pool.query(
-              `
-    UPDATE products
-    SET
-      extras = jsonb_set(
-        COALESCE(extras, '{}'),
-        '{variants}',
-        $1::jsonb,
-        true
-      ),
-      stock = $2
-    WHERE id = $3
-  `,
-              [JSON.stringify(updatedVariants), totalStock, prodId],
-            );
-
-            console.log("Update Variant :", returnOrderProduct);
-
-            // 4️⃣ Upsert return_orders
-            const checkQuery = `
-    SELECT products
-    FROM return_orders
-    WHERE order_id=$1
-    LIMIT 1
-  `;
-            const checkRes = await pool.query(checkQuery, [id]);
-
-            if (checkRes.rows.length) {
-              // 🔁 Update existing return_order, append new product
-              const existingProducts = checkRes.rows[0].products || [];
-              const updatedProducts = Array.isArray(existingProducts)
-                ? [...existingProducts, returnOrderProduct]
-                : [returnOrderProduct];
-
-              await pool.query(
-                `
-      UPDATE return_orders
-      SET
-        products=$1,
-        reason=$2,
-        status=$3
-      WHERE order_id=$4
-    `,
-                [
-                  JSON.stringify(updatedProducts),
-                  returnReason || "No reason provided",
-                  "Returned",
-                  id,
-                ],
-              );
-            } else {
-              // ➕ Insert new return_order
-              await pool.query(
-                `
-      INSERT INTO return_orders (id, order_id, customer_id, customer_name, products, reason, status, created_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-    `,
-                [
-                  generateId("RO"),
-                  id,
-                  customerId,
-                  customerName,
-                  JSON.stringify([returnOrderProduct]),
-                  returnReason || "No reason provided",
-                  "Returned",
-                ],
-              );
-            }
-
-            /* 🔔 Notify customer & seller */
-            const sellerId = returnOrderProduct.sellerid;
-            const seller_role = returnOrderProduct.seller_role;
-
-            await createNotification({
-              userId: customerId,
-              userRole: "customer",
-              title: "Order Returned",
-              message: `A product in order ${id} has been returned.`,
-              type: "order",
-              refId: id,
-              expiresAt: "7d",
-            });
-
-            if (sellerId) {
-              await createNotification({
-                userId: sellerId,
-                userRole: seller_role,
-                title: "Order Returned",
-                message: `A product in order ${id} has been returned.`,
-                type: "order",
-                refId: id,
-                expiresAt: "7d",
-              });
-            }
-
-            if (updatedOrderItems.length > 0) {
-              const updateQuery = `UPDATE orders SET order_items=$1 WHERE order_id=$2`;
-              await pool.query(updateQuery, [
-                JSON.stringify(updatedOrderItems),
-                id,
-              ]);
-            } else {
-              await pool.query("DELETE FROM orders WHERE order_id=$1", [id]);
-            }
-
-            return res.status(200).json({
-              message: "Order Returned Successfully",
-              updatedCount: 1,
-            });
-          }
-          case "Cancelled": {
-            const cancelledProduct = await pool.query(
-              "SELECT extras,stock FROM products WHERE id=$1",
-              [prodId],
-            );
-            const productRow = cancelledProduct.rows[0];
-            const extras = productRow.extras || {};
-            const variants = extras.variants || [];
-
-            const cancelledOrderProduct = orderItems.map((item) => {
-              const cancelProd = item.productinfo.find(
-                (prod) => prod.product_Id === prodId,
-              );
-              return {
-                ...cancelProd,
-                order_status: order_status,
-                product_img: images,
-                seller_name: item.seller_name,
-                seller_role: item.seller_role,
-                sellerid: item.sellerid,
-                seller_store_name: item.seller_store_name,
-              };
-            })[0];
-
-            const updatedOrderItems = orderItems
-              .map((item) => {
-                const updatedProds = item.productinfo.filter(
-                  (prod) => prod.product_Id !== prodId,
-                );
-                return { ...item, productinfo: updatedProds };
-              })
-              .filter((item) => item.productinfo.length > 0);
-
-            const cancelOrderProductVariantId =
-              cancelledOrderProduct.variants.id;
-            returnedQty = cancelledOrderProduct.qty;
-
-            const updatedVariants = variants.map((variant) => {
-              if (variant.id === cancelOrderProductVariantId) {
-                return { ...variant, stock: variant.stock + returnedQty };
-              }
-              return variant;
-            });
-
-            const totalStock = updatedVariants.reduce(
-              (sum, variant) => sum + (Number(variant.stock) || 0),
-              0,
-            );
-
-            await pool.query(
-              `
-    UPDATE products
-    SET
-      extras = jsonb_set(
-        COALESCE(extras, '{}'),
-        '{variants}',
-        $1::jsonb,
-        true
-      ),
-      stock = $2
-    WHERE id = $3
-  `,
-              [JSON.stringify(updatedVariants), totalStock, prodId],
-            );
-
-            console.log("Update Variant :", cancelledOrderProduct);
-            /* 🔔 Notify customer & seller */
-            const sellerId = cancelledOrderProduct.sellerid;
-            const seller_role = cancelledOrderProduct.seller_role;
-
-            await createNotification({
-              userId: customerId,
-              userRole: "customer",
-              title: "Order Cancelled",
-              message: `A product in order ${id} has been returned.`,
-              type: "order",
-              refId: id,
-              expiresAt: "7d",
-            });
-
-            if (sellerId) {
-              await createNotification({
-                userId: sellerId,
-                userRole: seller_role,
-                title: "Order Cancelled",
-                message: `A product in order ${id} has been returned.`,
-                type: "order",
-                refId: id,
-                expiresAt: "7d",
-              });
-            }
-
-            if (updatedOrderItems.length > 0) {
-              const updateQuery = `UPDATE orders SET order_items=$1 WHERE order_id=$2`;
-              await pool.query(updateQuery, [
-                JSON.stringify(updatedOrderItems),
-                id,
-              ]);
-            } else {
-              await pool.query("DELETE FROM orders WHERE order_id=$1", [id]);
-            }
-
-            return res.status(200).json({
-              message: "Order Cancelled Successfully",
-              updatedCount: 1,
-            });
           }
 
-          case "Processing":
-          case "Shipped":
-          case "Out for Delivery":
-          case "Delivered":
-            // no extra logic, just status update
-            break;
+          // Remove returned/cancelled product from order_items
+          const updatedOrderItems = orderItems
+            .map((item) => ({
+              ...item,
+              productinfo: item.productinfo.filter(
+                (p) => p.product_Id !== prodId,
+              ),
+            }))
+            .filter((item) => item.productinfo.length > 0);
 
-          default:
-            return res.status(400).json({ message: "Invalid order status" });
-        }
+          if (updatedOrderItems.length > 0) {
+            await pool.query(
+              `UPDATE orders SET order_items=$1 WHERE order_id=$2`,
+              [JSON.stringify(updatedOrderItems), id],
+            );
+          } else {
+            await pool.query(`DELETE FROM orders WHERE order_id=$1`, [id]);
+          }
 
-        // 3️⃣ Update order_items
-        const updatedOrderItems = orderItems.map((item) => {
-          let updatedProducts = item.productinfo.map((prod) => {
-            if (prod.product_Id === prodId) {
-              prod.order_status = order_status;
-            }
-            return prod;
+          // Notifications
+          await createNotification({
+            userId: customerId,
+            userRole: "customer",
+            title: `Order ${order_status}`,
+            message: `A product in your order ${id} has been ${order_status.toLowerCase()}.`,
+            type: "order",
+            refId: id,
+            expiresAt: "7d",
           });
 
-          return { ...item, productinfo: updatedProducts };
-        });
+          return res.status(200).json({
+            message: `Order ${order_status} successfully`,
+            updatedCount: 1,
+          });
+        }
 
-        customerId = orderRes.rows[0].customer_id;
+        // ----------------------------
+        // Other statuses (Processing, Shipped, Delivered...)
+        // ----------------------------
+        const updatedOrderItems = orderItems.map((item) => ({
+          ...item,
+          productinfo: item.productinfo.map((p) => {
+            if (p.product_Id === prodId) p.order_status = order_status;
+            return p;
+          }),
+        }));
 
-        // আগের মতোই update
-        const updateQuery = `UPDATE orders SET order_items=$1 WHERE order_id=$2`;
-        const updatedResult = await pool.query(updateQuery, [
-          JSON.stringify(updatedOrderItems),
-          id,
-        ]);
+        const updatedResult = await pool.query(
+          `UPDATE orders SET order_items=$1 WHERE order_id=$2`,
+          [JSON.stringify(updatedOrderItems), id],
+        );
 
         if (updatedResult.rowCount > 0) {
-          const sellerId = updatedOrderItems[0].sellerid;
+          const sellerId =
+            updatedOrderItems[0]?.productinfo[0]?.sellerid || null;
+          const sellerRole =
+            updatedOrderItems[0]?.productinfo[0]?.seller_role || "seller";
 
-          /* 🔔 Notify customer about status change */
+          // Customer notification
           await createNotification({
             userId: customerId,
             userRole: "customer",
@@ -7561,11 +7168,11 @@ WHERE customer_email = $1;
             expiresAt: "7d",
           });
 
-          /* 🔔 Notify seller (if exists) */
+          // Seller notification
           if (sellerId) {
             await createNotification({
               userId: sellerId,
-              userRole: "seller",
+              userRole: sellerRole,
               title: "Order Update",
               message: `One of your products in order ${id} is now "${order_status}".`,
               type: "order",
@@ -7573,12 +7180,16 @@ WHERE customer_email = $1;
               expiresAt: "7d",
             });
           }
+
           return res.json({
             message: "Order status updated",
             updatedCount: updatedResult.rowCount,
           });
         }
+
+        res.status(400).json({ message: "No update performed" });
       } catch (error) {
+        console.error(error);
         res.status(500).json({ message: error.message });
       }
     });

@@ -8,13 +8,47 @@ link TEXT,
 image TEXT
 );
 
+-- CREATE TABLE products (
+--     id VARCHAR(255) PRIMARY KEY,
+--     product_name VARCHAR(255) NOT NULL,
+--     regular_price INT DEFAULT 0,
+--     sale_price INT NOT NULL,
+--     discount INT DEFAULT 0,
+--     rating NUMERIC(2,1),
+--     isBestSeller BOOLEAN DEFAULT FALSE,
+--     isHot BOOLEAN DEFAULT FALSE,
+--     isNew BOOLEAN DEFAULT TRUE,
+--     isTrending BOOLEAN DEFAULT FALSE,
+--     isLimitedStock BOOLEAN DEFAULT FALSE,
+--     isExclusive BOOLEAN DEFAULT FALSE,
+--     isFlashSale BOOLEAN DEFAULT FALSE,
+--     canDeleteByModerator BOOLEAN DEFAULT FALSE,
+--     category VARCHAR(100),
+--     subcategory VARCHAR(100),
+--     subcategory_item VARCHAR(100),
+--     description TEXT,
+--     stock INT DEFAULT 0,
+--     brand VARCHAR(100),
+--     weight INT DEFAULT 1,
+--     thumbnail TEXT,
+--     images TEXT[],
+--     extras JSONB,
+--     reviews JSONB[] DEFAULT '{}',
+--     questions JSONB[] DEFAULT '{}',
+--     createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+--     updatedAt TIMESTAMP DEFAULT NULL,
+--     seller_id VARCHAR(100),
+--     seller_name VARCHAR(150),
+--     seller_store_name VARCHAR(150),
+--     seller_role VARCHAR(50) 
+-- );
 CREATE TABLE products (
     id VARCHAR(255) PRIMARY KEY,
     product_name VARCHAR(255) NOT NULL,
-    regular_price INT DEFAULT 0,
-    sale_price INT NOT NULL,
-    discount INT DEFAULT 0,
-    rating NUMERIC(2,1),
+     regular_price INT DEFAULT 0 CHECK (regular_price >= 0),
+    sale_price INT NOT NULL CHECK (sale_price >= 0),
+    discount INT DEFAULT 0 CHECK (discount >= 0),
+    rating NUMERIC(2,1) CHECK (rating >= 0 AND rating <= 5),
     isBestSeller BOOLEAN DEFAULT FALSE,
     isHot BOOLEAN DEFAULT FALSE,
     isNew BOOLEAN DEFAULT TRUE,
@@ -27,17 +61,20 @@ CREATE TABLE products (
     subcategory VARCHAR(100),
     subcategory_item VARCHAR(100),
     description TEXT,
-    stock INT DEFAULT 0,
+        stock INT DEFAULT 0 CHECK (stock >= 0),
+
     brand VARCHAR(100),
-    weight INT DEFAULT 1,
+   weight INT DEFAULT 1 CHECK (weight > 0),
     thumbnail TEXT,
     images TEXT[],
-    extras JSONB,
-    reviews JSONB[] DEFAULT '{}',
-    questions JSONB[] DEFAULT '{}',
+    variants_images TEXT[],
+    reviews JSONB[] DEFAULT ARRAY[]::JSONB[],
+    questions JSONB[] DEFAULT ARRAY[]::JSONB[],
     createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updatedAt TIMESTAMP DEFAULT NULL,
-    seller_id VARCHAR(100),
+        seller_id VARCHAR(100) REFERENCES sellers(id) ON DELETE CASCADE,
+
+
     seller_name VARCHAR(150),
     seller_store_name VARCHAR(150),
     seller_role VARCHAR(50) 
@@ -47,12 +84,13 @@ CREATE TABLE product_variants (
   id VARCHAR(255) PRIMARY KEY,
   product_id VARCHAR(255) REFERENCES products(id) ON DELETE CASCADE,
   attributes JSONB,
-  regular_price INT,
-  sale_price INT,
-  stock INT,
-  image TEXT,
+  regular_price INT CHECK (regular_price >= 0),
+sale_price INT CHECK (sale_price >= 0),
+stock INT CHECK (stock >= 0),
   created_at TIMESTAMP DEFAULT NOW()
 );
+
+
 
 
 
@@ -385,6 +423,9 @@ CREATE TABLE messages (
     image_url TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+
+
 
 
 

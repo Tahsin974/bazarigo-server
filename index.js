@@ -1187,41 +1187,41 @@ ORDER BY store_name, id ASC;
       async (req, res) => {
         try {
           const query = `
-      SELECT
-        p.*,
-        COALESCE(SUM((pi->>'qty')::INT), 0) AS sold,
-        COALESCE(
-          jsonb_agg(DISTINCT jsonb_strip_nulls(v_base || v.attributes))
-            FILTER (WHERE v.id IS NOT NULL),
-          '[]'
-        ) AS variants
-      FROM products p
-      LEFT JOIN (
-        SELECT 
-          id,
-          product_id,
-          regular_price,
-          sale_price,
-          stock,
-          attributes,
-          jsonb_build_object(
-            'id', id,
-            'regular_price', regular_price,
-            'sale_price', sale_price,
-            'stock', stock
-          ) AS v_base
-        FROM product_variants
-      ) v
-        ON v.product_id = p.id
-      LEFT JOIN orders o
-        ON TRUE
-      LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
-        ON TRUE
-      LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
-        ON pi->>'product_Id' = p.id
-      GROUP BY p.id
-      ORDER BY sold DESC;
-    `;
+WITH sold_data AS (
+  SELECT
+    pi->>'product_Id' AS product_id,
+    SUM((pi->>'qty')::INT) AS sold
+  FROM orders o
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) oi ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') pi ON TRUE
+  GROUP BY pi->>'product_Id'
+),
+variant_data AS (
+  SELECT
+    product_id,
+    jsonb_agg(
+      jsonb_strip_nulls(
+        jsonb_build_object(
+          'id', id,
+          'regular_price', regular_price,
+          'sale_price', sale_price,
+          'stock', stock
+        ) || attributes
+      )
+      ORDER BY created_at ASC
+    ) AS variants
+  FROM product_variants
+  GROUP BY product_id
+)
+SELECT
+  p.*,
+  COALESCE(s.sold, 0) AS sold,
+  COALESCE(v.variants, '[]') AS variants
+FROM products p
+LEFT JOIN sold_data s ON s.product_id = p.id
+LEFT JOIN variant_data v ON v.product_id = p.id
+ORDER BY sold DESC;
+`;
 
           const result = await pool.query(query);
           res.status(200).json({
@@ -1244,42 +1244,41 @@ ORDER BY store_name, id ASC;
           const productId = req.params.id;
 
           const query = `
-      SELECT
-        p.*,
-        COALESCE(SUM((pi->>'qty')::INT), 0) AS sold,
-        COALESCE(
-          jsonb_agg(DISTINCT jsonb_strip_nulls(v_base || v.attributes))
-            FILTER (WHERE v.id IS NOT NULL),
-          '[]'
-        ) AS variants
-      FROM products p
-      LEFT JOIN (
-        SELECT 
-          id,
-          product_id,
-          regular_price,
-          sale_price,
-          stock,
-          attributes,
-          jsonb_build_object(
-            'id', id,
-            'regular_price', regular_price,
-            'sale_price', sale_price,
-            'stock', stock
-          ) AS v_base
-        FROM product_variants
-      ) v
-        ON v.product_id = p.id
-      LEFT JOIN orders o
-        ON TRUE
-      LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
-        ON TRUE
-      LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
-        ON pi->>'product_Id' = p.id
-        WHERE p.id = $1
-      GROUP BY p.id
-      ORDER BY sold DESC;
-    `;
+WITH sold_data AS (
+  SELECT
+    pi->>'product_Id' AS product_id,
+    SUM((pi->>'qty')::INT) AS sold
+  FROM orders o
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) oi ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') pi ON TRUE
+  GROUP BY pi->>'product_Id'
+),
+variant_data AS (
+  SELECT
+    product_id,
+    jsonb_agg(
+      jsonb_strip_nulls(
+        jsonb_build_object(
+          'id', id,
+          'regular_price', regular_price,
+          'sale_price', sale_price,
+          'stock', stock
+        ) || attributes
+      )
+      ORDER BY created_at ASC
+    ) AS variants
+  FROM product_variants
+  GROUP BY product_id
+)
+SELECT
+  p.*,
+  COALESCE(s.sold, 0) AS sold,
+  COALESCE(v.variants, '[]') AS variants
+FROM products p
+LEFT JOIN sold_data s ON s.product_id = p.id
+LEFT JOIN variant_data v ON v.product_id = p.id
+WHERE p.id = $1;
+`;
 
           const values = [productId];
           const result = await pool.query(query, values);
@@ -1298,7 +1297,6 @@ ORDER BY store_name, id ASC;
     app.get("/share/product/:id", async (req, res) => {
       try {
         const productId = req.params.id;
-        // const encodedId = Buffer.from(productId.toString()).toString("base64");
 
         const BASE_URL = process.env.BASEURL;
         const BACKEND_URL = process.env.URL;
@@ -1330,10 +1328,6 @@ ORDER BY store_name, id ASC;
           : `${BASE_URL}/Bazarigo-Homepage-Thumbnail.jpg`;
 
         const ua = req.headers["user-agent"] || "";
-        const isBot =
-          /facebookexternalhit|Facebot|Twitterbot|WhatsApp|LinkedInBot/i.test(
-            ua,
-          );
 
         res.send(`<!doctype html>
 <html lang="en">
@@ -1373,42 +1367,43 @@ ORDER BY store_name, id ASC;
           const { sellerId } = req.params;
 
           const query = `
-      SELECT
-        p.*,
-        COALESCE(SUM((pi->>'qty')::INT), 0) AS sold,
-        COALESCE(
-          jsonb_agg(DISTINCT jsonb_strip_nulls(v_base || v.attributes))
-            FILTER (WHERE v.id IS NOT NULL),
-          '[]'
-        ) AS variants
-      FROM products p
-      LEFT JOIN (
-        SELECT 
-          id,
-          product_id,
-          regular_price,
-          sale_price,
-          stock,
-          attributes,
-          jsonb_build_object(
-            'id', id,
-            'regular_price', regular_price,
-            'sale_price', sale_price,
-            'stock', stock
-          ) AS v_base
-        FROM product_variants
-      ) v
-        ON v.product_id = p.id
-      LEFT JOIN orders o
-        ON TRUE
-      LEFT JOIN LATERAL jsonb_array_elements(o.order_items) AS oi
-        ON TRUE
-      LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') AS pi
-        ON pi->>'product_Id' = p.id
-        WHERE p.seller_id = $1
-      GROUP BY p.id
-      ORDER BY sold DESC;
-    `;
+WITH sold_data AS (
+  SELECT
+    pi->>'product_Id' AS product_id,
+    SUM((pi->>'qty')::INT) AS sold
+  FROM orders o
+  LEFT JOIN LATERAL jsonb_array_elements(o.order_items) oi ON TRUE
+  LEFT JOIN LATERAL jsonb_array_elements(oi->'productinfo') pi ON TRUE
+  GROUP BY pi->>'product_Id'
+),
+variant_data AS (
+  SELECT
+    product_id,
+    jsonb_agg(
+      jsonb_strip_nulls(
+        jsonb_build_object(
+          'id', id,
+          'regular_price', regular_price,
+          'sale_price', sale_price,
+          'stock', stock
+        ) || attributes
+      )
+      ORDER BY created_at ASC
+    ) AS variants
+  FROM product_variants
+  GROUP BY product_id
+)
+SELECT
+  p.*,
+  COALESCE(s.sold, 0) AS sold,
+  COALESCE(v.variants, '[]') AS variants
+FROM products p
+LEFT JOIN sold_data s ON s.product_id = p.id
+LEFT JOIN variant_data v ON v.product_id = p.id
+WHERE p.seller_id = $1
+ORDER BY sold DESC;
+`;
+
           const values = [sellerId];
           const result = await pool.query(query, values);
 
@@ -3667,13 +3662,17 @@ ORDER BY store_name, id ASC;
             return res.status(400).json({ message: "Invalid change value" });
           }
 
-          // Moderator / admin check
+          // Admin / Moderator check
           const isModerator =
             req.user.role === "moderator" || req.user.role === "admin";
 
           const productQuery = isModerator
-            ? "SELECT id, seller_id, product_name, stock FROM products WHERE seller_role='super admin' AND id=$1"
-            : "SELECT id, seller_id, product_name, stock FROM products WHERE seller_id=$1 AND id=$2";
+            ? `SELECT id, seller_id, product_name, stock 
+           FROM products 
+           WHERE seller_role='super admin' AND id=$1`
+            : `SELECT id, seller_id, product_name, stock 
+           FROM products 
+           WHERE seller_id=$1 AND id=$2`;
 
           const productResult = await pool.query(
             productQuery,
@@ -3686,18 +3685,64 @@ ORDER BY store_name, id ASC;
 
           const product = productResult.rows[0];
 
-          // Fetch all variants for this product
+          // Fetch variants
           const { rows: variants } = await pool.query(
             "SELECT id, stock FROM product_variants WHERE product_id=$1",
             [productId],
           );
 
-          // Update variant stocks
+          /* =====================================================
+         CASE 1: ❌ No Variants → Update Main Product Stock
+      ====================================================== */
+          if (variants.length === 0) {
+            const newStock = Math.max((product.stock || 0) + change, 0);
+
+            // Notifications
+            if (newStock === 0) {
+              await createNotification({
+                userId: product.seller_id,
+                userRole: "seller",
+                title: "Product Out of Stock",
+                message: `${product.product_name} is OUT OF STOCK.`,
+                type: "out_of_stock",
+                refId: productId,
+                refData: { newStock },
+                expiresAt: "2d",
+              });
+            } else if (newStock <= 5) {
+              await createNotification({
+                userId: product.seller_id,
+                userRole: "seller",
+                title: "Low Stock Warning",
+                message: `${product.product_name} LOW STOCK: Only ${newStock} left.`,
+                type: "low_stock",
+                refId: productId,
+                refData: { newStock },
+                expiresAt: "2d",
+              });
+            }
+
+            await pool.query("UPDATE products SET stock=$1 WHERE id=$2", [
+              newStock,
+              productId,
+            ]);
+
+            return res.json({
+              updated: true,
+              totalStock: newStock,
+              updatedVariants: [],
+              message: "Main product stock updated (no variants)",
+            });
+          }
+
+          /* =====================================================
+         CASE 2: ✅ Variants Exist → Update All Variants
+      ====================================================== */
           const updatedVariants = await Promise.all(
             variants.map(async (v) => {
               const newStock = Math.max((v.stock || 0) + change, 0);
 
-              // Notifications
+              // Variant notifications
               if (newStock === 0) {
                 await createNotification({
                   userId: product.seller_id,
@@ -3722,7 +3767,6 @@ ORDER BY store_name, id ASC;
                 });
               }
 
-              // Update DB
               await pool.query(
                 "UPDATE product_variants SET stock=$1 WHERE id=$2",
                 [newStock, v.id],
@@ -3732,11 +3776,12 @@ ORDER BY store_name, id ASC;
             }),
           );
 
-          // Update main product total stock
+          // Recalculate main product stock
           const totalStock = updatedVariants.reduce(
             (sum, v) => sum + v.stock,
             0,
           );
+
           await pool.query("UPDATE products SET stock=$1 WHERE id=$2", [
             totalStock,
             productId,
@@ -3749,6 +3794,7 @@ ORDER BY store_name, id ASC;
             message: "All variant stocks updated successfully",
           });
         } catch (err) {
+          console.error(err);
           res.status(500).json({ message: err.message });
         }
       },
@@ -4406,52 +4452,52 @@ ORDER BY store_name, id ASC;
           { expiresIn: "7d" },
         );
 
-        // res
-        //   .clearCookie("Token", {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     path: "/",
-        //     maxAge: 0,
-        //   })
-        //   .clearCookie("RefreshToken", {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     path: "/",
-        //     maxAge: 0,
-        //   });
+        res
+          .clearCookie("Token", {
+            httpOnly: true,
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
+            path: "/",
+            maxAge: 0,
+          })
+          .clearCookie("RefreshToken", {
+            httpOnly: true,
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
+            path: "/",
+            maxAge: 0,
+          });
 
-        // res.cookie("Token", newAccessToken, {
-        //   httpOnly: true,
-        //   secure: true,
-        //   sameSite: "None",
-        //   domain: ".bazarigo.com",
-        //   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        // });
-
-        // Clear old cookies
-        res.clearCookie("Token", {
-          httpOnly: true,
-          sameSite: "Strict",
-          maxAge: 0,
-        });
-
-        res.clearCookie("RefreshToken", {
-          httpOnly: true,
-          sameSite: "Strict",
-          maxAge: 0,
-        });
-
-        // Set new access token
         res.cookie("Token", newAccessToken, {
           httpOnly: true,
-          secure: false,
-          sameSite: "Strict",
+          secure: true,
+          sameSite: "None",
+          domain: ".bazarigo.com",
           maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         });
+
+        // Clear old cookies
+        // res.clearCookie("Token", {
+        //   httpOnly: true,
+        //   sameSite: "Strict",
+        //   maxAge: 0,
+        // });
+
+        // res.clearCookie("RefreshToken", {
+        //   httpOnly: true,
+        //   sameSite: "Strict",
+        //   maxAge: 0,
+        // });
+
+        // // Set new access token
+        // res.cookie("Token", newAccessToken, {
+        //   httpOnly: true,
+        //   secure: false,
+        //   sameSite: "Strict",
+        //   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        // });
 
         res.json({ message: "Access token refreshed" });
       } catch (err) {
@@ -4490,38 +4536,38 @@ ORDER BY store_name, id ASC;
           },
         );
 
-        // res
-        //   .cookie("Token", accessToken, {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        //   })
-        //   .cookie("RefreshToken", refreshToken, {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-        //   })
-        //   .redirect(`${process.env.BASEURL}${redirectPath}`);
-
-        // Set new access token
         res
           .cookie("Token", accessToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
             maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
           })
           .cookie("RefreshToken", refreshToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
             maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
           })
           .redirect(`${process.env.BASEURL}${redirectPath}`);
+
+        // Set new access token
+        // res
+        //   .cookie("Token", accessToken, {
+        //     httpOnly: true,
+        //     secure: false,
+        //     sameSite: "Strict",
+        //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        //   })
+        //   .cookie("RefreshToken", refreshToken, {
+        //     httpOnly: true,
+        //     secure: false,
+        //     sameSite: "Strict",
+        //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+        //   })
+        //   .redirect(`${process.env.BASEURL}${redirectPath}`);
       },
     );
     // POST: Create Users API Route
@@ -4841,7 +4887,7 @@ ORDER BY store_name, id ASC;
   <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px; background-color: #f9f9f9;">
     <h2 style="color: #FF0055; text-align: center;">Bazarigo</h2>
     <p>Hi there,</p>
-    <p>Use the following One-Time Password (OTP) to login to your Bazaarigo account. This OTP is valid for <strong>5 minutes</strong>.</p>
+    <p>Use the following One-Time Password (OTP) to login to your Bazaarigo account. This OTP is valid for <strong>1 minute</strong>.</p>
     <p style="text-align: center; margin: 30px 0;">
       <span style="font-size: 28px; font-weight: bold; letter-spacing: 4px; color: #FF0055;">${otp}</span>
     </p>
@@ -5121,39 +5167,19 @@ ORDER BY store_name, id ASC;
           },
         );
 
-        // res
-        //   .cookie("Token", accessToken, {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        //   })
-        //   .cookie("RefreshToken", refreshToken, {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-        //   })
-        //   .status(200)
-        //   .json({
-        //     message: "Login successful",
-        //     login: true,
-        //     role,
-        //   });
-
         res
           .cookie("Token", accessToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
             maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
           })
           .cookie("RefreshToken", refreshToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
             maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
           })
           .status(200)
@@ -5162,6 +5188,26 @@ ORDER BY store_name, id ASC;
             login: true,
             role,
           });
+
+        // res
+        //   .cookie("Token", accessToken, {
+        //     httpOnly: true,
+        //     secure: false,
+        //     sameSite: "Strict",
+        //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        //   })
+        //   .cookie("RefreshToken", refreshToken, {
+        //     httpOnly: true,
+        //     secure: false,
+        //     sameSite: "Strict",
+        //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+        //   })
+        //   .status(200)
+        //   .json({
+        //     message: "Login successful",
+        //     login: true,
+        //     role,
+        //   });
       } catch (err) {
         res.status(500).json({ message: err.message });
       }
@@ -5236,37 +5282,21 @@ ORDER BY store_name, id ASC;
     );
     // Logout Route
     app.post("/logout", (req, res) => {
-      // res
-      //   .clearCookie("Token", {
-      //     httpOnly: true,
-      //     secure: true,
-      //     sameSite: "None",
-      //     domain: ".bazarigo.com",
-      //     path: "/",
-      //     maxAge: 0,
-      //   })
-      //   .clearCookie("RefreshToken", {
-      //     httpOnly: true,
-      //     secure: true,
-      //     sameSite: "None",
-      //     domain: ".bazarigo.com",
-      //     path: "/",
-      //     maxAge: 0,
-      //   })
-      //   .status(200)
-      //   .json({
-      //     message: "logout success",
-      //     logOut: true,
-      //   });
       res
         .clearCookie("Token", {
           httpOnly: true,
-          sameSite: "Strict",
+          secure: true,
+          sameSite: "None",
+          domain: ".bazarigo.com",
+          path: "/",
           maxAge: 0,
         })
         .clearCookie("RefreshToken", {
           httpOnly: true,
-          sameSite: "Strict",
+          secure: true,
+          sameSite: "None",
+          domain: ".bazarigo.com",
+          path: "/",
           maxAge: 0,
         })
         .status(200)
@@ -5274,6 +5304,22 @@ ORDER BY store_name, id ASC;
           message: "logout success",
           logOut: true,
         });
+      // res
+      //   .clearCookie("Token", {
+      //     httpOnly: true,
+      //     sameSite: "Strict",
+      //     maxAge: 0,
+      //   })
+      //   .clearCookie("RefreshToken", {
+      //     httpOnly: true,
+      //     sameSite: "Strict",
+      //     maxAge: 0,
+      //   })
+      //   .status(200)
+      //   .json({
+      //     message: "logout success",
+      //     logOut: true,
+      //   });
     });
 
     // Forget Password

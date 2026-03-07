@@ -1294,6 +1294,70 @@ WHERE p.id = $1;
     );
     // GET: Share Product API Route
 
+    //     app.get("/share/product/:id", async (req, res) => {
+    //       try {
+    //         const productId = req.params.id;
+
+    //         const BASE_URL = process.env.BASEURL;
+    //         const BACKEND_URL = process.env.URL;
+
+    //         const { rows } = await pool.query(
+    //           `SELECT product_name, description, thumbnail
+    //        FROM products WHERE id = $1`,
+    //           [productId],
+    //         );
+
+    //         if (!rows.length) {
+    //           return res.status(404).send("Product not found");
+    //         }
+
+    //         const product = rows[0];
+
+    //         const stripHtml = (str = "") =>
+    //           str
+    //             .replace(/<[^>]*>/g, "")
+    //             .replace(/\s+/g, " ")
+    //             .trim();
+
+    //         const title = product.product_name;
+    //         const description =
+    //           stripHtml(product.description).slice(0, 120) + "...";
+
+    //         const imageUrl = product.thumbnail
+    //           ? `${BACKEND_URL}${product.thumbnail}`
+    //           : `${BASE_URL}/Bazarigo-Homepage-Thumbnail.jpg`;
+
+    //         const ua = req.headers["user-agent"] || "";
+
+    //         res.send(`<!doctype html>
+    // <html lang="en">
+    // <head>
+    //   <meta charset="utf-8" />
+    //   <title>${title}</title>
+
+    //   <link rel="canonical" href="${BASE_URL}/product/${productId}" />
+
+    //   <meta property="og:type" content="product" />
+    //   <meta property="og:title" content="${title}" />
+    //   <meta property="og:description" content="${description}" />
+    //   <meta property="og:image" content="${imageUrl}" />
+    //   <meta property="og:image:width" content="1200" />
+    //   <meta property="og:image:height" content="630" />
+    //   <meta property="og:url" content="${BASE_URL}/product/${productId}" />
+
+    //   <meta name="twitter:card" content="summary_large_image" />
+    // </head>
+
+    // <body>
+    //   <p>Loading product…</p>
+    // </body>
+    // </html>`);
+    //       } catch (err) {
+    //         console.error(err);
+    //         res.status(500).send("Server error");
+    //       }
+    //     });
+
     app.get("/share/product/:id", async (req, res) => {
       try {
         const productId = req.params.id;
@@ -1302,7 +1366,7 @@ WHERE p.id = $1;
         const BACKEND_URL = process.env.URL;
 
         const { rows } = await pool.query(
-          `SELECT product_name, description, thumbnail
+          `SELECT product_name, description, thumbnail, updated_at
        FROM products WHERE id = $1`,
           [productId],
         );
@@ -1319,37 +1383,51 @@ WHERE p.id = $1;
             .replace(/\s+/g, " ")
             .trim();
 
-        const title = product.product_name;
-        const description =
-          stripHtml(product.description).slice(0, 120) + "...";
+        const title = product.product_name || "Product";
 
+        const description = product.description
+          ? stripHtml(product.description).slice(0, 160)
+          : title;
+
+        // 🔥 cache breaking image url
         const imageUrl = product.thumbnail
-          ? `${BACKEND_URL}${product.thumbnail}`
+          ? `${BACKEND_URL}${product.thumbnail}?v=${product.updated_at?.getTime() || Date.now()}`
           : `${BASE_URL}/Bazarigo-Homepage-Thumbnail.jpg`;
 
-        const ua = req.headers["user-agent"] || "";
+        // 🔥 disable caching
+        res.set({
+          "Cache-Control":
+            "no-store, no-cache, must-revalidate, proxy-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
+        });
 
         res.send(`<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>${title}</title>
+<meta charset="utf-8" />
+<title>${title}</title>
 
-  <link rel="canonical" href="${BASE_URL}/product/${productId}" />
+<link rel="canonical" href="${BASE_URL}/product/${productId}" />
 
-  <meta property="og:type" content="product" />
-  <meta property="og:title" content="${title}" />
-  <meta property="og:description" content="${description}" />
-  <meta property="og:image" content="${imageUrl}" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
-  <meta property="og:url" content="${BASE_URL}/product/${productId}" />
+<meta property="og:type" content="product" />
+<meta property="og:title" content="${title}" />
+<meta property="og:description" content="${description}" />
+<meta property="og:image" content="${imageUrl}" />
+<meta property="og:image:secure_url" content="${imageUrl}" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:url" content="${BASE_URL}/product/${productId}" />
 
-  <meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="${title}" />
+<meta name="twitter:description" content="${description}" />
+<meta name="twitter:image" content="${imageUrl}" />
+
 </head>
 
 <body>
-  <p>Loading product…</p>
+<p>Loading product...</p>
 </body>
 </html>`);
       } catch (err) {
@@ -1357,7 +1435,6 @@ WHERE p.id = $1;
         res.status(500).send("Server error");
       }
     });
-
     //GET: Get Products By SellerId API Route
     app.get(
       "/products/seller/:sellerId",
@@ -4304,6 +4381,15 @@ ORDER BY sold DESC;
       try {
         const sellerId = req.params.id;
         const { status } = req.body;
+        const sellerData = await pool.query(
+          "SELECT full_name, email FROM sellers WHERE id = $1",
+          [sellerId],
+        );
+
+        const seller = sellerData.rows[0];
+        if (!seller) {
+          return res.status(404).json({ message: "Seller not found" });
+        }
 
         // If rejected → delete seller
         if (status === "rejected") {
@@ -4321,6 +4407,30 @@ ORDER BY sold DESC;
               refId: sellerId,
               expiresAt: "7d",
             });
+            // Send rejection email
+            await sendEmail(
+              seller.email,
+              "Seller Application Rejected",
+              `
+<div style="font-family: Arial, sans-serif; max-width:600px; margin:auto; padding:25px; border:1px solid #eee; border-radius:10px;">
+<h2 style="text-align:center;color:#FF0055;">Bazarigo</h2>
+
+<p>Hello <strong>${seller.full_name}</strong>,</p>
+
+<p>Thank you for applying to become a seller on <strong>Bazarigo</strong>.</p>
+
+<p>Unfortunately, your seller application has been <strong>rejected</strong> after review.</p>
+
+<p>If you believe this was a mistake or need more information, please contact our support team.</p>
+
+<hr/>
+
+<p style="font-size:12px;color:#777;text-align:center;">
+© ${new Date().getFullYear()} Bazarigo. All rights reserved.
+</p>
+</div>
+`,
+            );
 
             return res.status(200).json({
               message: `Seller rejected and deleted successfully.`,
@@ -4347,6 +4457,30 @@ ORDER BY sold DESC;
               refId: sellerId,
               expiresAt: "7d",
             });
+            // Send approval email
+            await sendEmail(
+              seller.email,
+              "Seller Account Approved",
+              `
+<div style="font-family: Arial, sans-serif; max-width:600px; margin:auto; padding:25px; border:1px solid #eee; border-radius:10px;">
+<h2 style="text-align:center;color:#FF0055;">Bazarigo</h2>
+
+<p>Hello <strong>${seller.full_name}</strong>,</p>
+
+<p>Congratulations! Your seller account on <strong>Bazarigo</strong> has been <strong>approved</strong>.</p>
+
+<p>You can now log in and start adding products to begin selling.</p>
+
+<p>We wish you great success on our platform.</p>
+
+<hr/>
+
+<p style="font-size:12px;color:#777;text-align:center;">
+© ${new Date().getFullYear()} Bazarigo. All rights reserved.
+</p>
+</div>
+`,
+            );
 
             return res.status(200).json({
               message: `Seller approved successfully.`,
@@ -5071,6 +5205,44 @@ ORDER BY sold DESC;
                   expiresAt: "30d",
                 }),
               ),
+            );
+
+            await sendEmail(
+              process.env.SUPER_ADMIN,
+              "New Seller Application Received",
+              `
+<div style="font-family: Arial, sans-serif; max-width:600px; margin:auto; padding:25px; border:1px solid #eee; border-radius:10px; background:#fafafa;">
+  
+  <h2 style="text-align:center; color:#FF0055; margin-bottom:10px;">
+    Bazarigo
+  </h2>
+
+  <p style="font-size:14px; color:#333;">
+    Hello Admin,
+  </p>
+
+  <p style="font-size:14px; color:#333;">
+    A new seller has submitted a registration request on <strong>Bazarigo</strong>.
+  </p>
+
+  <div style="background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; margin:20px 0;">
+    <p style="margin:5px 0;"><strong>Name:</strong> ${tempData.full_Name}</p>
+    <p style="margin:5px 0;"><strong>Email:</strong> ${tempData.email}</p>
+    <p style="margin:5px 0;"><strong>Phone:</strong> ${tempData.phone || "N/A"}</p>
+  </div>
+
+  <p style="font-size:14px; color:#333;">
+    Please review this seller request from the admin dashboard and approve or reject the application.
+  </p>
+
+  <hr style="margin:25px 0; border:none; border-top:1px solid #ddd;" />
+
+  <p style="font-size:12px; color:#777; text-align:center;">
+    © ${new Date().getFullYear()} Bazarigo. All rights reserved.
+  </p>
+
+</div>
+`,
             );
           } catch (notifError) {}
 
@@ -6829,6 +7001,35 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
             });
           }),
         );
+
+        if (result.rowCount > 0) {
+          await sendEmail(
+            process.env.SUPER_ADMIN,
+            `New Order Received - ${orderId}`,
+            `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin:auto; padding:20px; background:#f9f9f9; border-radius:10px;">
+  <h2 style="color:#FF0055; text-align:center;">Bazarigo</h2>
+
+  <p><strong>A new order has been placed.</strong></p>
+
+  <table style="width:100%; margin-top:15px;">
+    <tr><td><strong>Order ID</strong></td><td>${orderId}</td></tr>
+    <tr><td><strong>Customer</strong></td><td>${payload.customerName}</td></tr>
+    <tr><td><strong>Email</strong></td><td>${payload.customerEmail}</td></tr>
+    <tr><td><strong>Phone</strong></td><td>${payload.customerPhone}</td></tr>
+    <tr><td><strong>Total</strong></td><td>৳ ${payload.total}</td></tr>
+  </table>
+
+  <p style="margin-top:20px;">Please check admin panel for full details.</p>
+
+  <hr />
+  <p style="font-size:12px; text-align:center; color:#777;">
+    © ${new Date().getFullYear()} Bazarigo
+  </p>
+</div>
+`,
+          );
+        }
 
         await client.query("COMMIT");
 

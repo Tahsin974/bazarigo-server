@@ -1294,70 +1294,6 @@ WHERE p.id = $1;
     );
     // GET: Share Product API Route
 
-    //     app.get("/share/product/:id", async (req, res) => {
-    //       try {
-    //         const productId = req.params.id;
-
-    //         const BASE_URL = process.env.BASEURL;
-    //         const BACKEND_URL = process.env.URL;
-
-    //         const { rows } = await pool.query(
-    //           `SELECT product_name, description, thumbnail
-    //        FROM products WHERE id = $1`,
-    //           [productId],
-    //         );
-
-    //         if (!rows.length) {
-    //           return res.status(404).send("Product not found");
-    //         }
-
-    //         const product = rows[0];
-
-    //         const stripHtml = (str = "") =>
-    //           str
-    //             .replace(/<[^>]*>/g, "")
-    //             .replace(/\s+/g, " ")
-    //             .trim();
-
-    //         const title = product.product_name;
-    //         const description =
-    //           stripHtml(product.description).slice(0, 120) + "...";
-
-    //         const imageUrl = product.thumbnail
-    //           ? `${BACKEND_URL}${product.thumbnail}`
-    //           : `${BASE_URL}/Bazarigo-Homepage-Thumbnail.jpg`;
-
-    //         const ua = req.headers["user-agent"] || "";
-
-    //         res.send(`<!doctype html>
-    // <html lang="en">
-    // <head>
-    //   <meta charset="utf-8" />
-    //   <title>${title}</title>
-
-    //   <link rel="canonical" href="${BASE_URL}/product/${productId}" />
-
-    //   <meta property="og:type" content="product" />
-    //   <meta property="og:title" content="${title}" />
-    //   <meta property="og:description" content="${description}" />
-    //   <meta property="og:image" content="${imageUrl}" />
-    //   <meta property="og:image:width" content="1200" />
-    //   <meta property="og:image:height" content="630" />
-    //   <meta property="og:url" content="${BASE_URL}/product/${productId}" />
-
-    //   <meta name="twitter:card" content="summary_large_image" />
-    // </head>
-
-    // <body>
-    //   <p>Loading product…</p>
-    // </body>
-    // </html>`);
-    //       } catch (err) {
-    //         console.error(err);
-    //         res.status(500).send("Server error");
-    //       }
-    //     });
-
     app.get("/share/product/:id", async (req, res) => {
       try {
         const productId = req.params.id;
@@ -1366,8 +1302,8 @@ WHERE p.id = $1;
         const BACKEND_URL = process.env.URL;
 
         const { rows } = await pool.query(
-          `SELECT product_name, description, thumbnail, updated_at
-       FROM products WHERE id = $1`,
+          `SELECT product_name, description, thumbnail
+           FROM products WHERE id = $1`,
           [productId],
         );
 
@@ -1383,53 +1319,39 @@ WHERE p.id = $1;
             .replace(/\s+/g, " ")
             .trim();
 
-        const title = product.product_name || "Product";
+        const title = product.product_name;
+        const description =
+          stripHtml(product.description).slice(0, 120) + "...";
 
-        const description = product.description
-          ? stripHtml(product.description).slice(0, 160)
-          : title;
-
-        // 🔥 cache breaking image url
         const imageUrl = product.thumbnail
-          ? `${BACKEND_URL}${product.thumbnail}?v=${product.updated_at?.getTime() || Date.now()}`
+          ? `${BACKEND_URL}${product.thumbnail}`
           : `${BASE_URL}/Bazarigo-Homepage-Thumbnail.jpg`;
 
-        // 🔥 disable caching
-        res.set({
-          "Cache-Control":
-            "no-store, no-cache, must-revalidate, proxy-revalidate",
-          Pragma: "no-cache",
-          Expires: "0",
-        });
+        const ua = req.headers["user-agent"] || "";
 
         res.send(`<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<title>${title}</title>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8" />
+      <title>${title}</title>
 
-<link rel="canonical" href="${BASE_URL}/product/${productId}" />
+      <link rel="canonical" href="${BASE_URL}/product/${productId}" />
 
-<meta property="og:type" content="product" />
-<meta property="og:title" content="${title}" />
-<meta property="og:description" content="${description}" />
-<meta property="og:image" content="${imageUrl}" />
-<meta property="og:image:secure_url" content="${imageUrl}" />
-<meta property="og:image:width" content="1200" />
-<meta property="og:image:height" content="630" />
-<meta property="og:url" content="${BASE_URL}/product/${productId}" />
+      <meta property="og:type" content="product" />
+      <meta property="og:title" content="${title}" />
+      <meta property="og:description" content="${description}" />
+      <meta property="og:image" content="${imageUrl}" />
+      <meta property="og:image:width" content="1200" />
+      <meta property="og:image:height" content="630" />
+      <meta property="og:url" content="${BASE_URL}/product/${productId}" />
 
-<meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="${title}" />
-<meta name="twitter:description" content="${description}" />
-<meta name="twitter:image" content="${imageUrl}" />
+      <meta name="twitter:card" content="summary_large_image" />
+    </head>
 
-</head>
-
-<body>
-<p>Loading product...</p>
-</body>
-</html>`);
+    <body>
+      <p>Loading product…</p>
+    </body>
+    </html>`);
       } catch (err) {
         console.error(err);
         res.status(500).send("Server error");

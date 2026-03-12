@@ -4438,7 +4438,6 @@ ORDER BY sold DESC;
     // GET: Get Seller By Id API Route
     app.get(
       "/sellers/:id",
-      passport.authenticate("jwt", { session: false }),
 
       async (req, res) => {
         try {

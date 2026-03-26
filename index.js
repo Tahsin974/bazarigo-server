@@ -2632,6 +2632,8 @@ ORDER BY sold DESC;
     p.category,
     p.isbestseller,
     p.isnew,
+    p.istrending,
+    p.islimitedstock,
     p.images,
     p.thumbnail,
     p.reviews,
@@ -2674,6 +2676,8 @@ ORDER BY sold DESC;
     p.category,
     p.isbestseller,
     p.isnew,
+     p.istrending,
+    p.islimitedstock,
     p.images,
     p.thumbnail,
     p.reviews,
@@ -2716,6 +2720,8 @@ ORDER BY sold DESC;
     p.category,
     p.isbestseller,
     p.isnew,
+     p.istrending,
+    p.islimitedstock,
     p.images,
     p.thumbnail,
     p.reviews,
@@ -2758,6 +2764,8 @@ ORDER BY sold DESC;
     p.category,
     p.isbestseller,
     p.isnew,
+     p.istrending,
+    p.islimitedstock,
     p.images,
     p.thumbnail,
     p.reviews,
@@ -2800,6 +2808,8 @@ ORDER BY sold DESC;
     p.category,
     p.isbestseller,
     p.isnew,
+     p.istrending,
+    p.islimitedstock,
     p.images,
     p.thumbnail,
     p.reviews,
@@ -2842,6 +2852,8 @@ ORDER BY sold DESC;
     p.category,
     p.isbestseller,
     p.isnew,
+     p.istrending,
+    p.islimitedstock,
     p.images,
     p.thumbnail,
     p.reviews,
@@ -2885,6 +2897,8 @@ ORDER BY sold DESC;
     p.category,
     p.isbestseller,
     p.isnew,
+     p.istrending,
+    p.islimitedstock,
     p.images,
     p.thumbnail,
     p.reviews,
@@ -2927,6 +2941,8 @@ ORDER BY sold DESC;
     p.category,
     p.isbestseller,
     p.isnew,
+     p.istrending,
+    p.islimitedstock,
     p.images,
     p.thumbnail,
     p.reviews,
@@ -4507,52 +4523,52 @@ ORDER BY sold DESC;
           { expiresIn: "7d" },
         );
 
-        res
-          .clearCookie("Token", {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            path: "/",
-            maxAge: 0,
-          })
-          .clearCookie("RefreshToken", {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            path: "/",
-            maxAge: 0,
-          });
+        // res
+        //   .clearCookie("Token", {
+        //     httpOnly: true,
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
+        //     path: "/",
+        //     maxAge: 0,
+        //   })
+        //   .clearCookie("RefreshToken", {
+        //     httpOnly: true,
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
+        //     path: "/",
+        //     maxAge: 0,
+        //   });
 
-        res.cookie("Token", newAccessToken, {
-          httpOnly: true,
-          secure: true,
-          sameSite: "None",
-          domain: ".bazarigo.com",
-          maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        });
-
-        // Clear old cookies
-        // res.clearCookie("Token", {
-        //   httpOnly: true,
-        //   sameSite: "Strict",
-        //   maxAge: 0,
-        // });
-
-        // res.clearCookie("RefreshToken", {
-        //   httpOnly: true,
-        //   sameSite: "Strict",
-        //   maxAge: 0,
-        // });
-
-        // // Set new access token
         // res.cookie("Token", newAccessToken, {
         //   httpOnly: true,
-        //   secure: false,
-        //   sameSite: "Strict",
+        //   secure: true,
+        //   sameSite: "None",
+        //   domain: ".bazarigo.com",
         //   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         // });
+
+        // Clear old cookies
+        res.clearCookie("Token", {
+          httpOnly: true,
+          sameSite: "Strict",
+          maxAge: 0,
+        });
+
+        res.clearCookie("RefreshToken", {
+          httpOnly: true,
+          sameSite: "Strict",
+          maxAge: 0,
+        });
+
+        // Set new access token
+        res.cookie("Token", newAccessToken, {
+          httpOnly: true,
+          secure: false,
+          sameSite: "Strict",
+          maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        });
 
         res.json({ message: "Access token refreshed" });
       } catch (err) {
@@ -4591,38 +4607,38 @@ ORDER BY sold DESC;
           },
         );
 
-        res
-          .cookie("Token", accessToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-          })
-          .cookie("RefreshToken", refreshToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-          })
-          .redirect(`${process.env.BASEURL}${redirectPath}`);
-
-        // Set new access token
         // res
         //   .cookie("Token", accessToken, {
         //     httpOnly: true,
-        //     secure: false,
-        //     sameSite: "Strict",
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
         //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         //   })
         //   .cookie("RefreshToken", refreshToken, {
         //     httpOnly: true,
-        //     secure: false,
-        //     sameSite: "Strict",
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
         //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
         //   })
         //   .redirect(`${process.env.BASEURL}${redirectPath}`);
+
+        // Set new access token
+        res
+          .cookie("Token", accessToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "Strict",
+            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+          })
+          .cookie("RefreshToken", refreshToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "Strict",
+            maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+          })
+          .redirect(`${process.env.BASEURL}${redirectPath}`);
       },
     );
     // POST: Create Users API Route
@@ -5260,39 +5276,19 @@ ORDER BY sold DESC;
           },
         );
 
-        res
-          .cookie("Token", accessToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-          })
-          .cookie("RefreshToken", refreshToken, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "None",
-            domain: ".bazarigo.com",
-            maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-          })
-          .status(200)
-          .json({
-            message: "Login successful",
-            login: true,
-            role,
-          });
-
         // res
         //   .cookie("Token", accessToken, {
         //     httpOnly: true,
-        //     secure: false,
-        //     sameSite: "Strict",
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
         //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         //   })
         //   .cookie("RefreshToken", refreshToken, {
         //     httpOnly: true,
-        //     secure: false,
-        //     sameSite: "Strict",
+        //     secure: true,
+        //     sameSite: "None",
+        //     domain: ".bazarigo.com",
         //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
         //   })
         //   .status(200)
@@ -5301,6 +5297,26 @@ ORDER BY sold DESC;
         //     login: true,
         //     role,
         //   });
+
+        res
+          .cookie("Token", accessToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "Strict",
+            maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+          })
+          .cookie("RefreshToken", refreshToken, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "Strict",
+            maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+          })
+          .status(200)
+          .json({
+            message: "Login successful",
+            login: true,
+            role,
+          });
       } catch (err) {
         res.status(500).json({ message: err.message });
       }
@@ -5375,37 +5391,21 @@ ORDER BY sold DESC;
     );
     // Logout Route
     app.post("/logout", (req, res) => {
-      res
-        .clearCookie("Token", {
-          httpOnly: true,
-          secure: true,
-          sameSite: "None",
-          domain: ".bazarigo.com",
-          path: "/",
-          maxAge: 0,
-        })
-        .clearCookie("RefreshToken", {
-          httpOnly: true,
-          secure: true,
-          sameSite: "None",
-          domain: ".bazarigo.com",
-          path: "/",
-          maxAge: 0,
-        })
-        .status(200)
-        .json({
-          message: "logout success",
-          logOut: true,
-        });
       // res
       //   .clearCookie("Token", {
       //     httpOnly: true,
-      //     sameSite: "Strict",
+      //     secure: true,
+      //     sameSite: "None",
+      //     domain: ".bazarigo.com",
+      //     path: "/",
       //     maxAge: 0,
       //   })
       //   .clearCookie("RefreshToken", {
       //     httpOnly: true,
-      //     sameSite: "Strict",
+      //     secure: true,
+      //     sameSite: "None",
+      //     domain: ".bazarigo.com",
+      //     path: "/",
       //     maxAge: 0,
       //   })
       //   .status(200)
@@ -5413,6 +5413,22 @@ ORDER BY sold DESC;
       //     message: "logout success",
       //     logOut: true,
       //   });
+      res
+        .clearCookie("Token", {
+          httpOnly: true,
+          sameSite: "Strict",
+          maxAge: 0,
+        })
+        .clearCookie("RefreshToken", {
+          httpOnly: true,
+          sameSite: "Strict",
+          maxAge: 0,
+        })
+        .status(200)
+        .json({
+          message: "logout success",
+          logOut: true,
+        });
     });
 
     // Forget Password
@@ -7089,7 +7105,7 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
       verifyAdmin,
       async (req, res) => {
         try {
-          const query = "SELECT * FROM orders;";
+          const query = "SELECT * FROM orders ORDER BY order_date DESC;";
 
           const result = await pool.query(query);
           res.status(200).json({
@@ -7952,7 +7968,13 @@ WHERE customer_email = $1;
     // Send message
 
     app.post("/send", upload.single("image"), async (req, res) => {
-      let { sender_id, sender_role, receiver_id, receiver_role } = req.body;
+      let {
+        sender_id,
+        sender_role,
+        receiver_id,
+        receiver_role,
+        receiver_email,
+      } = req.body;
       let content = req.body.content; // undefined হলে খালি string
       const id = uuidv4();
 
@@ -8057,6 +8079,29 @@ WHERE customer_email = $1;
             refId: sender_id, // reference to who sent the message
             expiresAt: "7d",
           });
+
+          await sendEmail(
+            receiver_email, // DB থেকে receiver_email নিতে হবে
+            ` New Message Received`,
+            `
+  <div style="font-family: Arial, sans-serif; max-width:600px; margin:auto; padding:20px; background:#f9f9f9; border-radius:10px; border:1px solid #e0e0e0;">
+    <h2 style="color:#FF0055; text-align:center; margin-bottom:10px;">Bazarigo</h2>
+
+    <p style="font-size:14px; color:#333; text-align:center;">
+      You have a new message. Please check your Bazarigo account to view it.
+    </p>
+
+    <p style="font-size:12px; color:#999; margin-top:10px; text-align:center;">
+      Received on: ${new Date().toLocaleString()}
+    </p>
+
+    <hr style="margin-top:20px;" />
+    <p style="font-size:12px; text-align:center; color:#777;">
+      © ${new Date().getFullYear()} Bazarigo
+    </p>
+  </div>
+  `,
+          );
         }
 
         res.status(200).json({ success: true, message: result.rows[0] });
@@ -8809,10 +8854,17 @@ ORDER BY lsd.day ASC;
               }
             }
           }
+          const sellerCountQuery = `SELECT COUNT(*) AS active_sellers 
+FROM sellers 
+WHERE status = 'approved';`;
+          const sellerCountResult = await pool.query(sellerCountQuery);
+          const activeSellers = Number(
+            sellerCountResult.rows[0].active_sellers || 0,
+          );
 
           // -------------------- BUILD RESPONSE --------------------
           const totalCustomers = customerSet.size;
-          const totalSellers = sellerMap.size;
+          const totalSellers = activeSellers;
           const averageOrderValue = totalOrders ? revenue / totalOrders : 0;
 
           const categoryData = Array.from(categoryMap).map(

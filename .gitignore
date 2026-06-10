@@ -3,3 +3,4 @@
 uploads
 .vercel
 .env*.local
+unused_backup

@@ -1153,7 +1153,8 @@ ORDER BY store_name, id ASC;
 
       async (req, res) => {
         try {
-          const query = "SELECT * FROM banner;";
+          const query = "SELECT * FROM banner ORDER BY created_at DESC;";
+
           const result = await pool.query(query);
           res.status(200).json({
             message: "Banner route is working!",
@@ -3899,7 +3900,7 @@ ORDER BY sold DESC;
           const query = `INSERT INTO sellers (
       id, email, user_name, password, full_name, phone_number, img,
       nid_number, store_name, product_category, business_address, district, thana,
-      postal_code, trade_license_number, nid_front_file, nid_back_file, bank_name,
+      division, trade_license_number, nid_front_file, nid_back_file, bank_name,
       branch_name, account_number, account_holder_name, routing_number, mobile_bank_name,
       mobile_bank_account_number, created_at, status,role, date_of_birth, gender
     ) VALUES (
@@ -3921,7 +3922,7 @@ ORDER BY sold DESC;
             sellerInfo.businessAddress || null,
             sellerInfo.district || null,
             sellerInfo.thana || null,
-            sellerInfo.postal_code || null,
+            sellerInfo.division || null,
             sellerInfo.tradeLicenseNumber || null,
             nidFrontPath || null,
             nidBackPath || null,
@@ -4040,7 +4041,7 @@ ORDER BY sold DESC;
             businessAddress: sellerInfo.businessAddress || null,
             district: sellerInfo.district || null,
             thana: sellerInfo.thana || null,
-            postal_code: sellerInfo.postal_code || null,
+            division: sellerInfo.division || null,
             tradeLicenseNumber: sellerInfo.tradeLicenseNumber || null,
             bankName: sellerInfo.bankName || null,
             branchName: sellerInfo.branchName || null,
@@ -4194,7 +4195,7 @@ ORDER BY sold DESC;
           business_address=$11,
           district=$12,
           thana=$13,
-          postal_code=$14,
+          division=$14,
           trade_license_number=$15,
           nid_front_file=$16,
           nid_back_file=$17,
@@ -4225,7 +4226,7 @@ ORDER BY sold DESC;
             payload.business_address || oldSeller.business_address,
             payload.district || oldSeller.district,
             payload.thana || oldSeller.thana,
-            payload.postal_code || oldSeller.postal_code,
+            payload.division || oldSeller.division,
             payload.trade_license_number || oldSeller.trade_license_number,
             nid_front_filePath || oldSeller.nid_front_file,
             nid_back_filePath || oldSeller.nid_back_file,
@@ -4494,7 +4495,7 @@ ORDER BY sold DESC;
           res.status(200).json({
             message: "Products Deleted successfully",
             admin: deletedProducts.rows[0],
-            deletedCount: deletedProducts.rowCount,
+            deletedCount: deletedProducts.rowCount || result.rowCount,
           });
         }
       } catch (error) {
@@ -4523,52 +4524,52 @@ ORDER BY sold DESC;
           { expiresIn: "7d" },
         );
 
-        // res
-        //   .clearCookie("Token", {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     path: "/",
-        //     maxAge: 0,
-        //   })
-        //   .clearCookie("RefreshToken", {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     path: "/",
-        //     maxAge: 0,
-        //   });
+        res
+          .clearCookie("Token", {
+            httpOnly: true,
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
+            path: "/",
+            maxAge: 0,
+          })
+          .clearCookie("RefreshToken", {
+            httpOnly: true,
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
+            path: "/",
+            maxAge: 0,
+          });
 
-        // res.cookie("Token", newAccessToken, {
-        //   httpOnly: true,
-        //   secure: true,
-        //   sameSite: "None",
-        //   domain: ".bazarigo.com",
-        //   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        // });
-
-        // Clear old cookies
-        res.clearCookie("Token", {
-          httpOnly: true,
-          sameSite: "Strict",
-          maxAge: 0,
-        });
-
-        res.clearCookie("RefreshToken", {
-          httpOnly: true,
-          sameSite: "Strict",
-          maxAge: 0,
-        });
-
-        // Set new access token
         res.cookie("Token", newAccessToken, {
           httpOnly: true,
-          secure: false,
-          sameSite: "Strict",
+          secure: true,
+          sameSite: "None",
+          domain: ".bazarigo.com",
           maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
         });
+
+        // Clear old cookies
+        // res.clearCookie("Token", {
+        //   httpOnly: true,
+        //   sameSite: "Strict",
+        //   maxAge: 0,
+        // });
+
+        // res.clearCookie("RefreshToken", {
+        //   httpOnly: true,
+        //   sameSite: "Strict",
+        //   maxAge: 0,
+        // });
+
+        // // Set new access token
+        // res.cookie("Token", newAccessToken, {
+        //   httpOnly: true,
+        //   secure: false,
+        //   sameSite: "Strict",
+        //   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        // });
 
         res.json({ message: "Access token refreshed" });
       } catch (err) {
@@ -4607,38 +4608,38 @@ ORDER BY sold DESC;
           },
         );
 
-        // res
-        //   .cookie("Token", accessToken, {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        //   })
-        //   .cookie("RefreshToken", refreshToken, {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-        //   })
-        //   .redirect(`${process.env.BASEURL}${redirectPath}`);
-
-        // Set new access token
         res
           .cookie("Token", accessToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
             maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
           })
           .cookie("RefreshToken", refreshToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
             maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
           })
           .redirect(`${process.env.BASEURL}${redirectPath}`);
+
+        // Set new access token
+        // res
+        //   .cookie("Token", accessToken, {
+        //     httpOnly: true,
+        //     secure: false,
+        //     sameSite: "Strict",
+        //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        //   })
+        //   .cookie("RefreshToken", refreshToken, {
+        //     httpOnly: true,
+        //     secure: false,
+        //     sameSite: "Strict",
+        //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+        //   })
+        //   .redirect(`${process.env.BASEURL}${redirectPath}`);
       },
     );
     // POST: Create Users API Route
@@ -4705,7 +4706,7 @@ ORDER BY sold DESC;
 
         const query = `INSERT INTO users (
       id, name, user_name, email, img, phone, password,
-      address, district, thana, postal_code, created_at, updated_at,
+      address, district, thana, division, created_at, updated_at,
       date_of_birth, gender
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), $12, $13
@@ -4722,7 +4723,7 @@ ORDER BY sold DESC;
           userInfo.address || null,
           userInfo.district || null,
           userInfo.thana || null,
-          userInfo.postal_code || null,
+          userInfo.division || null,
           userInfo.date_of_birth || null,
           userInfo.gender || null,
         ];
@@ -4809,7 +4810,7 @@ ORDER BY sold DESC;
           address: userInfo.address,
           district: userInfo.district,
           thana: userInfo.thana,
-          postal_code: userInfo.postal_code,
+          division: userInfo.division,
           date_of_birth: userInfo.date_of_birth,
           gender: userInfo.gender,
         };
@@ -5020,7 +5021,7 @@ ORDER BY sold DESC;
 
         const query = `INSERT INTO users (
       id, name, user_name, email, img, phone, password,
-      address, district, thana, postal_code, created_at, updated_at,
+      address, district, thana, division, created_at, updated_at,
       date_of_birth, gender
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), $12, $13
@@ -5037,7 +5038,7 @@ ORDER BY sold DESC;
           tempData.address || null,
           tempData.district || null,
           tempData.thana || null,
-          tempData.postal_code || null,
+          tempData.division || null,
           tempData.date_of_birth || null,
           tempData.gender || null,
         ];
@@ -5086,7 +5087,7 @@ ORDER BY sold DESC;
         const query = `INSERT INTO sellers (
       id, email, user_name, password, full_name, phone_number, img,
       nid_number, store_name, product_category, business_address, district, thana,
-      postal_code, trade_license_number, nid_front_file, nid_back_file, bank_name,
+      division, trade_license_number, nid_front_file, nid_back_file, bank_name,
       branch_name, account_number, account_holder_name, routing_number, mobile_bank_name,
       mobile_bank_account_number, created_at,  status, date_of_birth, gender
     ) VALUES (
@@ -5108,7 +5109,7 @@ ORDER BY sold DESC;
           tempData.businessAddress || null,
           tempData.district || null,
           tempData.thana || null,
-          tempData.postal_code || null,
+          tempData.division || null,
           tempData.tradeLicenseNumber || null,
           tempData.nidFront || null,
           tempData.nidBack || null,
@@ -5165,7 +5166,7 @@ ORDER BY sold DESC;
   <div style="background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; margin:20px 0;">
     <p style="margin:5px 0;"><strong>Name:</strong> ${tempData.full_Name}</p>
     <p style="margin:5px 0;"><strong>Email:</strong> ${tempData.email}</p>
-    <p style="margin:5px 0;"><strong>Phone:</strong> ${tempData.phone || "N/A"}</p>
+    <p style="margin:5px 0;"><strong>Phone:</strong> ${tempData.phone_number || "N/A"}</p>
   </div>
 
   <p style="font-size:14px; color:#333;">
@@ -5276,39 +5277,19 @@ ORDER BY sold DESC;
           },
         );
 
-        // res
-        //   .cookie("Token", accessToken, {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-        //   })
-        //   .cookie("RefreshToken", refreshToken, {
-        //     httpOnly: true,
-        //     secure: true,
-        //     sameSite: "None",
-        //     domain: ".bazarigo.com",
-        //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
-        //   })
-        //   .status(200)
-        //   .json({
-        //     message: "Login successful",
-        //     login: true,
-        //     role,
-        //   });
-
         res
           .cookie("Token", accessToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
             maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
           })
           .cookie("RefreshToken", refreshToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: "Strict",
+            secure: true,
+            sameSite: "None",
+            domain: ".bazarigo.com",
             maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
           })
           .status(200)
@@ -5317,6 +5298,26 @@ ORDER BY sold DESC;
             login: true,
             role,
           });
+
+        // res
+        //   .cookie("Token", accessToken, {
+        //     httpOnly: true,
+        //     secure: false,
+        //     sameSite: "Strict",
+        //     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+        //   })
+        //   .cookie("RefreshToken", refreshToken, {
+        //     httpOnly: true,
+        //     secure: false,
+        //     sameSite: "Strict",
+        //     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+        //   })
+        //   .status(200)
+        //   .json({
+        //     message: "Login successful",
+        //     login: true,
+        //     role,
+        //   });
       } catch (err) {
         res.status(500).json({ message: err.message });
       }
@@ -5391,37 +5392,21 @@ ORDER BY sold DESC;
     );
     // Logout Route
     app.post("/logout", (req, res) => {
-      // res
-      //   .clearCookie("Token", {
-      //     httpOnly: true,
-      //     secure: true,
-      //     sameSite: "None",
-      //     domain: ".bazarigo.com",
-      //     path: "/",
-      //     maxAge: 0,
-      //   })
-      //   .clearCookie("RefreshToken", {
-      //     httpOnly: true,
-      //     secure: true,
-      //     sameSite: "None",
-      //     domain: ".bazarigo.com",
-      //     path: "/",
-      //     maxAge: 0,
-      //   })
-      //   .status(200)
-      //   .json({
-      //     message: "logout success",
-      //     logOut: true,
-      //   });
       res
         .clearCookie("Token", {
           httpOnly: true,
-          sameSite: "Strict",
+          secure: true,
+          sameSite: "None",
+          domain: ".bazarigo.com",
+          path: "/",
           maxAge: 0,
         })
         .clearCookie("RefreshToken", {
           httpOnly: true,
-          sameSite: "Strict",
+          secure: true,
+          sameSite: "None",
+          domain: ".bazarigo.com",
+          path: "/",
           maxAge: 0,
         })
         .status(200)
@@ -5429,6 +5414,22 @@ ORDER BY sold DESC;
           message: "logout success",
           logOut: true,
         });
+      // res
+      //   .clearCookie("Token", {
+      //     httpOnly: true,
+      //     sameSite: "Strict",
+      //     maxAge: 0,
+      //   })
+      //   .clearCookie("RefreshToken", {
+      //     httpOnly: true,
+      //     sameSite: "Strict",
+      //     maxAge: 0,
+      //   })
+      //   .status(200)
+      //   .json({
+      //     message: "logout success",
+      //     logOut: true,
+      //   });
     });
 
     // Forget Password
@@ -5610,7 +5611,7 @@ ORDER BY sold DESC;
           address = $8,
           district = $9,
           thana = $10,
-          postal_code = $11,
+          division = $11,
           updated_at = NOW(),
           payment_methods = $12
         WHERE id = $13
@@ -5628,35 +5629,12 @@ ORDER BY sold DESC;
             payload.address || oldUser.address,
             payload.district || oldUser.district,
             payload.thana || oldUser.thana,
-            payload.postal_code || oldUser.postal_code,
+            payload.division || oldUser.division,
             JSON.stringify(paymentMethods),
             userId,
           ];
 
           const result = await pool.query(query, values);
-
-          // Orders update (যদি user previous orders থাকে)
-          if (result.rowCount > 0) {
-            const ordersResult = await pool.query(
-              `SELECT * FROM orders WHERE customer_id = $1`,
-              [userId],
-            );
-            if (ordersResult.rows.length > 0) {
-              await pool.query(
-                `UPDATE orders SET customer_name = $1, customer_email = $2 WHERE customer_id = $3`,
-                [
-                  payload.full_name || oldUser.name,
-                  payload.email || oldUser.email,
-                  userId,
-                ],
-              );
-            }
-
-            return res.status(200).json({
-              message: "User updated successfully",
-              updatedCount: result.rowCount,
-            });
-          }
         } catch (error) {
           if (error.code === "23505" && error.detail.includes("email")) {
             return res.status(400).json({ message: "Email already exists" });
@@ -6331,15 +6309,20 @@ WHERE c.user_email = $1;
     // ------------ Zone API Routes ----------------//
 
     // POST: Create Zone API Route
-    app.post("/zones", async (req, res) => {
+    app.post("/delivery-zones", async (req, res) => {
       try {
         const zoneInfo = req.body;
         const query =
-          "INSERT INTO zones (name,delivery_time,delivery_charge) VALUES ($1,$2,$3) RETURNING *;";
+          "INSERT INTO delivery_charges (area_type, same_district_charge, diff_district_charge, per_kg_charge, min_floor_charge, free_delivery_min_amount, cod_percentage, delivery_time) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *;";
         const values = [
-          zoneInfo.name,
+          zoneInfo.area_type,
+          zoneInfo.same_district_charge,
+          zoneInfo.diff_district_charge,
+          zoneInfo.per_kg_charge,
+          zoneInfo.min_floor_charge,
+          zoneInfo.free_delivery_min_amount,
+          zoneInfo.cod_percentage,
           zoneInfo.delivery_time,
-          zoneInfo.delivery_charge,
         ];
         const result = await pool.query(query, values);
         res.status(201).json({
@@ -6353,15 +6336,15 @@ WHERE c.user_email = $1;
     // ADMIN MIDDLEWARE
     // GET: Get Zones API Route
     app.get(
-      "/zones",
+      "/delivery-zones",
       passport.authenticate("jwt", { session: false }),
       verifyAdmin,
       async (req, res) => {
         try {
-          const query = "SELECT * FROM zones;";
+          const query = "SELECT * FROM delivery_charges;";
           const result = await pool.query(query);
           res.status(200).json({
-            message: "Zones route is working!",
+            message: "Delivery zones route is working!",
             zones: result.rows,
           });
         } catch (error) {
@@ -6369,29 +6352,77 @@ WHERE c.user_email = $1;
         }
       },
     );
+    // DELETE: Remove Zone By Id
+    app.delete(
+      "/delivery-zones/:id",
+
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+          const query =
+            "DELETE FROM delivery_charges WHERE id = $1 RETURNING *;";
+          const result = await pool.query(query, [id]);
+          if (result.rowCount === 0) {
+            return res.status(404).json({ message: "Zone not found" });
+          }
+          res.status(200).json({
+            message: "Zone deleted successfully",
+            deletedCount: result.rowCount,
+          });
+        } catch (error) {
+          res.status(500).json({ message: error.message });
+        }
+      },
+    );
+    // PUT: Update Zone API Route
+    app.put("/delivery-zones/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const zoneInfo = req.body;
+        const query = `UPDATE delivery_charges
+        SET area_type=$1, same_district_charge=$2, diff_district_charge=$3, per_kg_charge=$4, min_floor_charge=$5, free_delivery_min_amount=$6, cod_percentage=$7, delivery_time=$8
+        WHERE id = $9 RETURNING *;`;
+        const values = [
+          zoneInfo.area_type,
+
+          zoneInfo.same_district_charge,
+          zoneInfo.diff_district_charge,
+          zoneInfo.per_kg_charge,
+          zoneInfo.min_floor_charge,
+          zoneInfo.free_delivery_min_amount,
+          zoneInfo.cod_percentage,
+          zoneInfo.delivery_time,
+          id,
+        ];
+        const result = await pool.query(query, values);
+        res.status(200).json({
+          message: "Zone updated successfully",
+          updatedCount: result.rowCount,
+        });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
 
     // POST: Create Postal Zone API Route
+
     app.post("/postal-zones", async (req, res) => {
       try {
         const postalZoneInfo = req.body;
 
         const query = `
       INSERT INTO postal_zones
-        (postal_code, division, district, thana,place, latitude, longitude, is_remote)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ( division, district, thana,area_type)
+      VALUES ($1, $2, $3, $4)
 
       RETURNING *;
     `;
 
         const values = [
-          parseInt(postalZoneInfo.postal_code),
           postalZoneInfo.division,
           postalZoneInfo.district,
           postalZoneInfo.thana,
-          postalZoneInfo.place,
-          parseFloat(postalZoneInfo.latitude),
-          parseFloat(postalZoneInfo.longitude),
-          postalZoneInfo.is_remote || false, // default false if not provided
+          postalZoneInfo.area_type || "City Central", // default to 'City Central' if not provided
         ];
 
         const result = await pool.query(query, values);
@@ -6407,6 +6438,7 @@ WHERE c.user_email = $1;
     });
 
     // POST: Bulk Create Postal Zones API Route
+
     app.post("/postal-zones/bulk", async (req, res) => {
       try {
         const postalZones = req.body;
@@ -6420,28 +6452,22 @@ WHERE c.user_email = $1;
         const values = [];
         const placeholders = postalZones
           .map((zone, idx) => {
-            const baseIndex = idx * 8;
+            const baseIndex = idx * 4;
             values.push(
               zone.division,
               zone.district,
               zone.thana,
-              zone.place,
-              zone.postal_code,
-              zone.latitude,
-              zone.longitude,
-              zone.is_remote || false,
+              zone.area_type || "City Central", // default to 'City Central' if not provided
             );
             return `($${baseIndex + 1}, $${baseIndex + 2}, $${
               baseIndex + 3
-            }, $${baseIndex + 4}, $${baseIndex + 5}, $${baseIndex + 6}, $${
-              baseIndex + 7
-            },$${baseIndex + 8})`;
+            }, $${baseIndex + 4})`;
           })
           .join(", ");
 
         const query = `
       INSERT INTO postal_zones
-        (division, district, thana,place, postal_code, latitude, longitude, is_remote)
+        (division, district, thana,area_type)
       VALUES ${placeholders}
       RETURNING *;
     `;
@@ -6488,17 +6514,12 @@ ORDER BY
         const updatedZone = req.body;
         const { id } = req.params;
         const query = `UPDATE postal_zones
-        SET postal_code=$1, division=$2, district=$3, thana=$4,place=$5, latitude=$6, longitude=$7, is_remote=$8
-        WHERE id = $9;`;
+        SET  division=$1, district=$2, thana=$3, area_type=$4 WHERE id = $5;`;
         const values = [
-          parseInt(updatedZone.postal_code),
           updatedZone.division,
           updatedZone.district,
           updatedZone.thana,
-          updatedZone.place,
-          parseFloat(updatedZone.latitude),
-          parseFloat(updatedZone.longitude),
-          updatedZone.is_remote,
+          updatedZone.area_type,
           id,
         ];
 
@@ -6546,6 +6567,91 @@ ORDER BY
       }
     });
 
+    // GET: Get Divisions API Route
+
+    app.get("/address/divisions", async (req, res) => {
+      try {
+        const { rows } = await pool.query(
+          `SELECT DISTINCT division
+       FROM postal_zones
+       ORDER BY division ASC`,
+        );
+        const data = rows.map((r) => r.division);
+        return res.status(200).json({ success: true, data });
+      } catch (err) {
+        console.error("[GET /divisions]", err);
+        return res
+          .status(500)
+          .json({ success: false, message: "Failed to fetch divisions" });
+      }
+    });
+
+    // GET: Get Districts By Division API Route
+
+    app.get("/address/districts", async (req, res) => {
+      const { division } = req.query;
+
+      if (!division || !division.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "division query param is required",
+        });
+      }
+
+      try {
+        const { rows } = await pool.query(
+          `SELECT DISTINCT district
+       FROM postal_zones
+       WHERE division = $1
+       ORDER BY district ASC`,
+          [division.trim()],
+        );
+        const data = rows.map((r) => r.district);
+        return res.status(200).json({ success: true, data });
+      } catch (err) {
+        console.error("[GET /districts]", err);
+        return res
+          .status(500)
+          .json({ success: false, message: "Failed to fetch districts" });
+      }
+    });
+
+    // GET: Get Thanas By Division and District API Route
+
+    app.get("/address/thanas", async (req, res) => {
+      const { division, district } = req.query;
+
+      if (!division || !division.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "division query param is required",
+        });
+      }
+      if (!district || !district.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "district query param is required",
+        });
+      }
+
+      try {
+        const { rows } = await pool.query(
+          `SELECT DISTINCT thana
+       FROM postal_zones
+       WHERE division = $1 AND district = $2
+       ORDER BY thana ASC`,
+          [division.trim(), district.trim()],
+        );
+        const data = rows.map((r) => r.thana);
+        return res.status(200).json({ success: true, data });
+      } catch (err) {
+        console.error("[GET /thanas]", err);
+        return res
+          .status(500)
+          .json({ success: false, message: "Failed to fetch thanas" });
+      }
+    });
+
     // ------------ Zone API Routes End ----------------//
 
     // ------------ Delivery API Routes ----------------//
@@ -6554,135 +6660,204 @@ ORDER BY
     app.get(
       "/deliveries",
       passport.authenticate("jwt", { session: false }),
-
       async (req, res) => {
-        let {
-          sellerId,
-          userId,
-          weight: weightStr,
-          orderAmount: orderAmountStr,
-          isCod,
-        } = req.query;
-
-        const weight = parseInt(weightStr, 10) || 0;
-        const orderAmount = parseInt(orderAmountStr, 10) || 0;
-        const isCodBool = isCod === "true";
-
-        if (!sellerId || !userId || !weight || !orderAmount) {
-          return res.status(400).json({
-            error: "sellerId, userId, weight, and orderAmount are required",
-          });
-        }
-
         try {
-          // 🔹 যদি sellerId admin হয়, তাহলে bazarigo seller এর postal code নাও
-          const adminCheck = await pool.query(
-            "SELECT role, postal_code FROM admins WHERE id=$1",
-            [sellerId],
-          );
-          let sellerPostalCode = null;
+          let {
+            sellerId,
+            userId,
+            weight: weightStr,
+            orderAmount: orderAmountStr,
+            isCod,
+          } = req.query;
 
-          if (adminCheck.rows.length > 0) {
-            if (
-              adminCheck.rows[0].role === "admin" ||
-              adminCheck.rows[0].role === "moderator"
-            ) {
-              const bazarigo = await pool.query(
-                "SELECT postal_code FROM admins WHERE email='bazarigo.official@gmail.com'",
-              );
-              sellerPostalCode = bazarigo.rows[0]?.postal_code || "1212"; // default postal code
-            } else {
-              sellerPostalCode = adminCheck.rows[0].postal_code;
-            }
-          } else {
-            const sellerCheck = await pool.query(
-              "SELECT role, postal_code FROM sellers WHERE id=$1",
-              [sellerId],
-            );
+          const weight = parseInt(weightStr, 10) || 0;
+          const orderAmount = parseInt(orderAmountStr, 10) || 0;
+          const isCodBool = isCod === "true";
 
-            sellerPostalCode = sellerCheck.rows[0].postal_code;
+          if (!sellerId || !userId || !weight || !orderAmount) {
+            return res.status(400).json({
+              error: "sellerId, userId, weight, and orderAmount are required",
+            });
           }
 
-          const query = `
-WITH seller_postal AS (
-  SELECT district AS s_district, AVG(latitude) AS s_lat, AVG(longitude) AS s_lon
-  FROM postal_zones
-  WHERE postal_code = $1
-  GROUP BY district
-),
-customer_postal AS (
-  SELECT district AS c_district, AVG(latitude) AS c_lat, AVG(longitude) AS c_lon, MAX(is_remote::int) AS is_remote
-  FROM postal_zones
-  WHERE postal_code = (SELECT postal_code FROM users WHERE id = $2)
-  GROUP BY district
-),
-distance_calc AS (
-  SELECT *,
-  6371 * 2 * ASIN(SQRT( POWER(SIN(RADIANS((c_lat - s_lat)/2)),2) + COS(RADIANS(s_lat)) * COS(RADIANS(c_lat)) * POWER(SIN(RADIANS((c_lon - s_lon)/2)),2) )) AS distance_km
-  FROM seller_postal sp CROSS JOIN customer_postal cp
-),
-zone_calc AS (
-  SELECT CASE
-    WHEN is_remote = 1 THEN 'Remote Area'
-    WHEN distance_km <= 20 THEN 'Inside Area'
-    WHEN distance_km <= 50 THEN 'Near Area'
-    ELSE 'Outside Area'
-  END AS zone_name, distance_km
-  FROM distance_calc
-)
-SELECT zc.zone_name, z.delivery_time,
-  CAST(
-  (
-    CASE
-      WHEN ($4 * 1.01) >= COALESCE(z.free_delivery_min_amount, 999999)
-        THEN 0
-      ELSE GREATEST(
-        CASE
-          WHEN zc.zone_name = 'Inside Area' THEN 70
-          WHEN zc.zone_name = 'Near Area' THEN 100
-          WHEN zc.zone_name = 'Outside Area' THEN 120
-          WHEN zc.zone_name = 'Remote Area' THEN 200
-          ELSE 0
-        END,
-        z.delivery_charge +
-        (GREATEST(COALESCE(NULLIF($3, '')::numeric, 1), 0) * 10)
-      )
-    END
-    +
-    CASE
-      WHEN $5 IS TRUE THEN GREATEST(10, $4 * 0.01)
-      ELSE 0
-    END
-  ) AS INTEGER
-) AS total_delivery_charge
+          // ─────────────────────────────────────────
+          // STEP 1: Seller/Admin lookup
+          // ─────────────────────────────────────────
+          const sellerResult = await pool.query(
+            `
+        SELECT district, role, source
+        FROM (
+          SELECT district, role, 'admin' AS source
+          FROM admins
+          WHERE id = $1
 
-FROM zone_calc zc
-LEFT JOIN zones z ON z.name = zc.zone_name;
-`;
+          UNION ALL
 
-          const result = await pool.query(query, [
-            sellerPostalCode, // $1
-            userId,
-            weight,
-            orderAmount,
-            isCodBool || false,
-          ]);
+          SELECT district, NULL AS role, 'seller' AS source
+          FROM sellers
+          WHERE id = $1
+        ) x
+        LIMIT 1
+        `,
+            [sellerId],
+          );
 
-          if (result.rows.length === 0) {
+          if (sellerResult.rows.length === 0) {
+            return res.status(404).json({
+              error: "Seller not found",
+            });
+          }
+
+          let { district: sellerDistrict, role, source } = sellerResult.rows[0];
+
+          if (
+            source === "admin" &&
+            (role === "admin" || role === "moderator")
+          ) {
+            sellerDistrict = "Dhaka";
+          }
+
+          // ─────────────────────────────────────────
+          // STEP 2: Customer + Zone lookup
+          // ─────────────────────────────────────────
+          const userZoneResult = await pool.query(
+            `
+        SELECT
+          u.district,
+          u.thana,
+          z.area_type
+        FROM users u
+        LEFT JOIN LATERAL (
+          SELECT area_type
+          FROM postal_zones
+          WHERE district = u.district
+          ORDER BY
+            CASE WHEN thana = u.thana THEN 1 ELSE 2 END
+          LIMIT 1
+        ) z ON true
+        WHERE u.id = $1
+        `,
+            [userId],
+          );
+
+          if (userZoneResult.rows.length === 0) {
+            return res.status(404).json({
+              error: "Customer not found",
+            });
+          }
+
+          let {
+            district: customerDistrict,
+            thana: customerThana,
+            area_type: customerAreaType,
+          } = userZoneResult.rows[0];
+
+          // ─────────────────────────────────────────
+          // STEP 3: NO ADDRESS fallback (safe estimate)
+          // ─────────────────────────────────────────
+          if (!customerDistrict || !customerThana) {
+            const codCharge = isCodBool
+              ? Math.max(10, Math.round(orderAmount * 0.01))
+              : 0;
+
             return res.status(200).json({
               result: [
                 {
-                  zone_name: "Inside Area",
+                  area_type: "City Central",
                   delivery_time: "1-2 days",
-                  total_delivery_charge: 70,
+                  total_delivery_charge: 80 + codCharge,
+                  is_default_estimate: true,
                 },
               ],
             });
           }
 
-          return res.status(200).json({ result: result.rows });
+          // fallback area
+          if (!customerAreaType) {
+            customerAreaType = "City Central";
+          }
+
+          // ─────────────────────────────────────────
+          // STEP 4: Delivery Config (DB driven)
+          // ─────────────────────────────────────────
+          const chargeResult = await pool.query(
+            `
+        SELECT *
+        FROM delivery_charges
+        WHERE area_type = $1
+        LIMIT 1
+        `,
+            [customerAreaType],
+          );
+
+          if (chargeResult.rows.length === 0) {
+            return res.status(400).json({
+              error: `Delivery config not found for ${customerAreaType}`,
+            });
+          }
+
+          const {
+            same_district_charge,
+            diff_district_charge,
+            per_kg_charge,
+            free_delivery_min_amount,
+            cod_percentage,
+            min_floor_charge,
+            delivery_time,
+          } = chargeResult.rows[0];
+
+          // ─────────────────────────────────────────
+          // STEP 5: Calculation
+          // ─────────────────────────────────────────
+          const isSameDistrict =
+            sellerDistrict?.toLowerCase() === customerDistrict?.toLowerCase();
+
+          const baseCharge = isSameDistrict
+            ? Number(same_district_charge)
+            : Number(diff_district_charge);
+
+          const weightCharge = weight * Number(per_kg_charge || 20);
+
+          const rawCharge = baseCharge + weightCharge;
+
+          const floor = Number(min_floor_charge || 0);
+
+          const isFreeDelivery =
+            orderAmount >= Number(free_delivery_min_amount || 999999);
+
+          let chargeBeforeCod = 0;
+
+          if (!isFreeDelivery) {
+            chargeBeforeCod = isSameDistrict
+              ? Math.max(floor, rawCharge)
+              : rawCharge;
+          }
+
+          const codCharge = isCodBool
+            ? Math.max(10, orderAmount * (Number(cod_percentage || 1) / 100))
+            : 0;
+
+          const totalDeliveryCharge = Math.round(chargeBeforeCod + codCharge);
+
+          // ─────────────────────────────────────────
+          // STEP 6: Response (DB driven)
+          // ─────────────────────────────────────────
+          return res.status(200).json({
+            result: [
+              {
+                area_type: customerAreaType,
+                delivery_time: delivery_time || "2-3 days",
+                total_delivery_charge: totalDeliveryCharge,
+                is_same_district: isSameDistrict,
+                is_free_delivery: isFreeDelivery,
+                cod_charge: Math.round(codCharge),
+              },
+            ],
+          });
         } catch (err) {
-          return res.status(500).json({ error: err.message });
+          return res.status(500).json({
+            error: err.message,
+          });
         }
       },
     );
@@ -6752,65 +6927,119 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
         // =============================
         const updateNormalStock = async (item) => {
           const variantRes = await client.query(
-            `SELECT id, product_id, stock, regular_price, sale_price FROM product_variants WHERE id=$1`,
+            `SELECT id, product_id, stock, regular_price, sale_price 
+     FROM product_variants WHERE id=$1`,
             [item.variant_id],
           );
-          if (!variantRes.rows.length) return;
 
-          const variant = variantRes.rows[0];
-          const newStock = Math.max((variant.stock || 0) - item.qty, 0);
+          // =============================
+          // CASE 1: VARIANT EXISTS
+          // =============================
+          if (variantRes.rows.length) {
+            const variant = variantRes.rows[0];
+            const newStock = Math.max((variant.stock || 0) - item.qty, 0);
 
-          // Update variant stock
-          await client.query(
-            `UPDATE product_variants SET stock=$1 WHERE id=$2`,
-            [newStock, variant.id],
-          );
+            // Update variant stock
+            await client.query(
+              `UPDATE product_variants SET stock=$1 WHERE id=$2`,
+              [newStock, variant.id],
+            );
 
-          // Notification
-          const notifications = [];
-          if (newStock === 0) notifications.push({ type: "out_of_stock" });
-          else if (newStock <= 5) notifications.push({ type: "low_stock" });
+            // Notification logic (UNCHANGED)
+            const notifications = [];
+            if (newStock === 0) notifications.push({ type: "out_of_stock" });
+            else if (newStock <= 5) notifications.push({ type: "low_stock" });
 
-          if (notifications.length) {
-            const productRes = await client.query(
-              `SELECT product_name, seller_id FROM products WHERE id=$1`,
+            if (notifications.length) {
+              const productRes = await client.query(
+                `SELECT product_name, seller_id FROM products WHERE id=$1`,
+                [variant.product_id],
+              );
+              const product = productRes.rows[0];
+
+              await Promise.all(
+                notifications.map((n) =>
+                  createNotification({
+                    userId: product.seller_id,
+                    userRole: "seller",
+                    title:
+                      n.type === "out_of_stock"
+                        ? "Product Out of Stock"
+                        : "Low Stock Warning",
+                    message: `${product.product_name} (Variant ${variant.id}) ${
+                      n.type === "out_of_stock"
+                        ? "is now OUT OF STOCK."
+                        : "stock is low. Only " + newStock + " left."
+                    }`,
+                    type: n.type,
+                    refId: variant.product_id,
+                    expiresAt: "7d",
+                  }),
+                ),
+              );
+            }
+
+            // Update main product stock
+            const totalStockRes = await client.query(
+              `SELECT COALESCE(SUM(stock),0) AS total_stock 
+       FROM product_variants WHERE product_id=$1`,
               [variant.product_id],
             );
-            const product = productRes.rows[0];
 
-            await Promise.all(
-              notifications.map((n) =>
-                createNotification({
-                  userId: product.seller_id,
-                  userRole: "seller",
-                  title:
-                    n.type === "out_of_stock"
-                      ? "Product Out of Stock"
-                      : "Low Stock Warning",
-                  message: `${product.product_name} (Variant ${variant.id}) ${
-                    n.type === "out_of_stock"
-                      ? "is now OUT OF STOCK."
-                      : "stock is low. Only " + newStock + " left."
-                  }`,
-                  type: n.type,
-                  refId: variant.product_id,
-                  expiresAt: "7d",
-                }),
-              ),
-            );
+            await client.query(`UPDATE products SET stock=$1 WHERE id=$2`, [
+              totalStockRes.rows[0].total_stock,
+              variant.product_id,
+            ]);
           }
 
-          // Update main product stock = sum of all variants
-          const totalStockRes = await client.query(
-            `SELECT COALESCE(SUM(stock),0) AS total_stock FROM product_variants WHERE product_id=$1`,
-            [variant.product_id],
-          );
-          const totalStock = totalStockRes.rows[0].total_stock;
+          // =============================
+          // CASE 2: NO VARIANT → UPDATE MAIN PRODUCT STOCK
+          // =============================
+          else {
+            const productRes = await client.query(
+              `SELECT stock, product_name, seller_id FROM products WHERE id=$1`,
+              [item.product_id],
+            );
 
-          await client.query(`UPDATE products SET stock=$1 WHERE id=$2`, [
-            totalStock,
-            variant.product_id,
-          ]);
+            if (!productRes.rows.length) return;
+
+            const product = productRes.rows[0];
+
+            const newStock = Math.max((product.stock || 0) - item.qty, 0);
+
+            await client.query(`UPDATE products SET stock=$1 WHERE id=$2`, [
+              newStock,
+              item.product_id,
+            ]);
+
+            // Optional notifications for main product stock
+            const notifications = [];
+            if (newStock === 0) notifications.push({ type: "out_of_stock" });
+            else if (newStock <= 5) notifications.push({ type: "low_stock" });
+
+            if (notifications.length) {
+              await Promise.all(
+                notifications.map((n) =>
+                  createNotification({
+                    userId: product.seller_id,
+                    userRole: "seller",
+                    title:
+                      n.type === "out_of_stock"
+                        ? "Product Out of Stock"
+                        : "Low Stock Warning",
+                    message: `${product.product_name} stock is ${
+                      n.type === "out_of_stock"
+                        ? "now OUT OF STOCK"
+                        : "low. Only " + newStock + " left"
+                    }.`,
+                    type: n.type,
+                    refId: item.product_id,
+                    expiresAt: "7d",
+                  }),
+                ),
+              );
+            }
+          }
         };
 
         // Update all products concurrently
@@ -6937,6 +7166,21 @@ LEFT JOIN zones z ON z.name = zc.zone_name;
               expiresAt: "7d",
             });
           }),
+        );
+
+        const admins = await pool.query("SELECT id, role FROM admins");
+        await Promise.all(
+          admins.rows.map((admin) =>
+            createNotification({
+              userId: admin.id,
+              userRole: admin.role,
+              title: "New Order",
+              message: `You have received a new order`,
+              type: "Order",
+              refId: result.rows[0].order_id,
+              expiresAt: "7d",
+            }),
+          ),
         );
 
         if (result.rowCount > 0) {
@@ -7257,11 +7501,14 @@ WHERE customer_email = $1;
 
           returnedQty = productData.qty;
 
-          // Update variant stock directly
           const variantRes = await pool.query(
             `SELECT id, stock, product_id FROM product_variants WHERE id=$1`,
-            [variantId || productData.variants.id],
+            [variantId || productData.variants?.id],
           );
+
+          // =============================
+          // CASE 1: VARIANT EXISTS
+          // =============================
           if (variantRes.rows.length) {
             const variant = variantRes.rows[0];
             const newStock = (variant.stock || 0) + returnedQty;
@@ -7271,16 +7518,86 @@ WHERE customer_email = $1;
               [newStock, variant.id],
             );
 
-            // Update main product stock = sum of all variants
+            // update main product stock from variants
             const totalStockRes = await pool.query(
-              `SELECT COALESCE(SUM(stock),0) AS total_stock FROM product_variants WHERE product_id=$1`,
+              `SELECT COALESCE(SUM(stock),0) AS total_stock 
+     FROM product_variants WHERE product_id=$1`,
               [variant.product_id],
             );
-            const totalStock = totalStockRes.rows[0].total_stock;
+
             await pool.query(`UPDATE products SET stock=$1 WHERE id=$2`, [
-              totalStock,
+              totalStockRes.rows[0].total_stock,
               variant.product_id,
             ]);
+          }
+
+          // =============================
+          // CASE 2: NO VARIANT → UPDATE MAIN PRODUCT STOCK
+          // =============================
+          else {
+            const productRes = await pool.query(
+              `SELECT stock FROM products WHERE id=$1`,
+              [prodId],
+            );
+
+            if (productRes.rows.length) {
+              const currentStock = productRes.rows[0].stock || 0;
+              const newStock = currentStock + returnedQty;
+
+              await pool.query(`UPDATE products SET stock=$1 WHERE id=$2`, [
+                newStock,
+                prodId,
+              ]);
+            }
+          }
+
+          // ----------------------------
+          // 🆕 RETURN REQUEST → RETURN ORDERS INSERT
+          // ----------------------------
+          if (order_status === "Returned") {
+            const returnReqRes = await pool.query(
+              `SELECT reason, images, customer_id, customer_name
+         FROM return_requests
+         WHERE order_id=$1 AND product_name=$2
+         ORDER BY request_date DESC
+         LIMIT 1`,
+              [id, productData.product_name],
+            );
+
+            const returnReq = returnReqRes.rows[0] || {};
+            const returnProduct = await pool.query(
+              "SELECT seller_store_name FROM products WHERE id=$1",
+              [prodId],
+            );
+
+            const returnReason = returnReq.reason || "No reason provided";
+            const returnImages = returnReq.images || [];
+            const returnCustomerId = returnReq.customer_id || customerId;
+            const returnCustomerName = returnReq.customer_name || "";
+
+            await pool.query(
+              `INSERT INTO return_orders
+         ( order_id, customer_id, customer_name, products, reason, status, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())`,
+              [
+                id,
+                returnCustomerId,
+                returnCustomerName,
+                JSON.stringify([
+                  {
+                    ...productData,
+                    returnImages,
+                    returnReason,
+                    order_status,
+                    seller_store_name:
+                      returnProduct.rows[0]?.seller_store_name ||
+                      "Unknown Seller",
+                  },
+                ]),
+                returnReason,
+                order_status,
+              ],
+            );
           }
 
           // Remove returned/cancelled product from order_items
@@ -7377,7 +7694,6 @@ WHERE customer_email = $1;
         res.status(500).json({ message: error.message });
       }
     });
-
     // PATCH: Update Return Request Status
     app.patch("/return-requests/status/:id", async (req, res) => {
       try {
@@ -7630,6 +7946,26 @@ WHERE customer_email = $1;
           res.status(200).json({
             message: "Payment return successfully",
             payments: result.rows,
+          });
+        } catch (error) {
+          res.status(500).json({ message: error.message });
+        }
+      },
+    );
+    // DELETE: Delete Return Order By id API Route
+    app.delete(
+      "/payments/delete/:id",
+      passport.authenticate("jwt", { session: false }),
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+          const query = "DELETE FROM payments WHERE id =$1;";
+
+          const result = await pool.query(query, [id]);
+          res.status(200).json({
+            message: "Payment route working successfully",
+            deletedCount: result.rowCount,
           });
         } catch (error) {
           res.status(500).json({ message: error.message });
@@ -8292,7 +8628,7 @@ ORDER BY lm.created_at DESC;
 
         const query = `
       INSERT INTO admins
-      (id, full_name, user_name, email, password, phone_number, profile_img, role, permissions, last_login, is_active, created_at, updated_at, address, district, thana, postal_code, date_of_birth, gender)
+      (id, full_name, user_name, email, password, phone_number, profile_img, role, permissions, last_login, is_active, created_at, updated_at, address, district, thana, division, date_of_birth, gender)
       VALUES (gen_random_uuid(), $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
       RETURNING *;
     `;
@@ -8313,7 +8649,7 @@ ORDER BY lm.created_at DESC;
           payload.address || null,
           payload.district || null,
           payload.thana || null,
-          payload.postal_code || null,
+          payload.division || null,
           payload.date_of_birth || null,
           payload.gender || null,
         ];
@@ -8338,8 +8674,8 @@ ORDER BY lm.created_at DESC;
       verifyAdmin,
       async (req, res) => {
         try {
-          const adminQuery = `SELECT id,address, full_name, user_name, email, phone_number, profile_img, role, permissions, last_login, is_active, created_at, updated_at,district,thana,postal_code,date_of_birth,gender,store_name,product_category,business_address FROM admins WHERE role='admin' OR role='super admin';`;
-          const moderatorQuery = `SELECT id,address, full_name, user_name, email, phone_number, profile_img, role, permissions, last_login, is_active, created_at, updated_at,district,thana,postal_code,date_of_birth,gender FROM admins WHERE role='moderator';`;
+          const adminQuery = `SELECT id,address, full_name, user_name, email, phone_number, profile_img, role, permissions, last_login, is_active, created_at, updated_at,district,thana,division,date_of_birth,gender,store_name,product_category,business_address FROM admins WHERE role='admin' OR role='super admin';`;
+          const moderatorQuery = `SELECT id,address, full_name, user_name, email, phone_number, profile_img, role, permissions, last_login, is_active, created_at, updated_at,district,thana,division,date_of_birth,gender FROM admins WHERE role='moderator';`;
 
           const adminResult = await pool.query(adminQuery);
           const moderatorResult = await pool.query(moderatorQuery);
@@ -8483,7 +8819,7 @@ ORDER BY lm.created_at DESC;
           address=$7,
           district=$8,
           thana=$9,
-          postal_code=$10,
+          division=$10,
           date_of_birth=$11,
           gender=$12,
           store_name=$13,
@@ -8505,7 +8841,7 @@ ORDER BY lm.created_at DESC;
             payload.address || oldAdmin.address,
             payload.district || oldAdmin.district,
             payload.thana || oldAdmin.thana,
-            payload.postal_code || oldAdmin.postal_code,
+            payload.division || oldAdmin.division,
             payload.date_of_birth || oldAdmin.date_of_birth,
             payload.gender || oldAdmin.gender,
             payload.store_name || oldAdmin.store_name,

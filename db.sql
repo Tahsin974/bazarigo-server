@@ -5,7 +5,9 @@
 CREATE TABLE banner (
 id VARCHAR(255) PRIMARY KEY,
 link TEXT,
-image TEXT
+image TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
 );
 
 -- CREATE TABLE products (
@@ -72,8 +74,8 @@ CREATE TABLE products (
     questions JSONB[] DEFAULT ARRAY[]::JSONB[],
     createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updatedAt TIMESTAMP DEFAULT NULL,
-        seller_id VARCHAR(100) REFERENCES sellers(id) ON DELETE CASCADE,
-
+        -- seller_id VARCHAR(100) REFERENCES sellers(id) ON DELETE CASCADE,
+seller_id VARCHAR(100),
 
     seller_name VARCHAR(150),
     seller_store_name VARCHAR(150),
@@ -105,6 +107,11 @@ CREATE TABLE flashSaleProducts (
 );
 
 
+
+ALTER TABLE admins
+ADD COLUMN division VARCHAR(100) DEFAULT NULL;
+
+
 -- Sellers Table
 CREATE TABLE sellers (
     id VARCHAR(255) PRIMARY KEY,
@@ -124,7 +131,7 @@ CREATE TABLE sellers (
     business_address TEXT DEFAULT NULL,
     district VARCHAR(100) NOT NULL,
     thana VARCHAR(100) NOT NULL,
-    postal_code INT  NOT NULL,
+    division VARCHAR(100) NULL,
     trade_license_number VARCHAR(50),
     nid_front_file TEXT,        
     nid_back_file TEXT,         
@@ -156,7 +163,7 @@ CREATE TABLE users (
   address TEXT DEFAULT NULL,
   district VARCHAR(100) NULL,
   thana VARCHAR(100) NULL,
-  postal_code INT DEFAULT NULL,
+  division VARCHAR(100) NULL,
   date_of_birth TIMESTAMP,
   gender TEXT,
   facebook_id VARCHAR(255) DEFAULT NULL,
@@ -184,7 +191,8 @@ CREATE TABLE admins (
     address TEXT DEFAULT NULL,
     district VARCHAR(100) NULL,
     thana VARCHAR(100) NULL,
-    postal_code INT DEFAULT NULL,
+    division VARCHAR(100) NULL,
+
     date_of_birth TIMESTAMP,
     gender TEXT,
     role VARCHAR(50) DEFAULT 'admin', 
@@ -226,14 +234,10 @@ CREATE TABLE zones (
 -- Postal Zones Table
 CREATE TABLE postal_zones (
   id SERIAL PRIMARY KEY,
-  postal_code INT  NOT NULL,
   division VARCHAR(100) NOT NULL,
   district VARCHAR(100) NOT NULL,
   thana VARCHAR(100) NOT NULL,
-  place VARCHAR(100) NOT NULL,
-  latitude NUMERIC(9,6) NOT NULL,
-  longitude NUMERIC(9,6) NOT NULL,
-  is_remote BOOLEAN DEFAULT FALSE
+  area_type VARCHAR(50) CHECK (area_type IN ('Remote Area', 'Sub-Urban', 'City Central')) NOT NULL
 );
 
 -- Orders Table
@@ -425,7 +429,40 @@ CREATE TABLE messages (
 );
 
 
+CREATE TABLE delivery_charges (
+  id SERIAL PRIMARY KEY,
 
+  area_type VARCHAR(50) UNIQUE NOT NULL
+  CHECK (area_type IN ('City Central', 'Sub-Urban', 'Remote Area')),
+
+  same_district_charge INTEGER NOT NULL,
+  diff_district_charge INTEGER NOT NULL,
+
+  per_kg_charge INTEGER DEFAULT 20,
+  min_floor_charge INTEGER DEFAULT 0,
+
+  free_delivery_min_amount INTEGER DEFAULT 2500,
+
+  cod_percentage NUMERIC(5,2) DEFAULT 1.00,
+
+  delivery_time VARCHAR(50) NOT NULL,
+
+  is_active BOOLEAN DEFAULT TRUE,
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Default data insert
+INSERT INTO delivery_charges
+(area_type, same_district_charge, diff_district_charge, per_kg_charge, min_floor_charge, free_delivery_min_amount, cod_percentage, delivery_time)
+
+VALUES
+('City Central', 60, 100, 20, 80, 2500, 1.00, '1-2 days'),
+
+('Sub-Urban', 80, 120, 20, 100, 2500, 1.00, '2-4 days'),
+
+('Remote Area', 100, 150, 20, 120, 2500, 1.00, '4-7 days');
 
 
 

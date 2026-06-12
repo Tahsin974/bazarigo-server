@@ -5635,6 +5635,10 @@ ORDER BY sold DESC;
           ];
 
           const result = await pool.query(query, values);
+          return res.status(200).json({
+            message: "User updated successfully",
+            updatedCount: result.rowCount,
+          });
         } catch (error) {
           if (error.code === "23505" && error.detail.includes("email")) {
             return res.status(400).json({ message: "Email already exists" });

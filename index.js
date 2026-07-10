@@ -378,7 +378,6 @@ function moveUnusedImages(files) {
     }
 
     fs.renameSync(file, finalDest);
-    console.log(`Moved: ${file} → ${finalDest}`);
   });
 }
 function toInt(value, fallback = 0) {
@@ -408,8 +407,6 @@ async function run() {
 
     // 03:00 AM every 3 days - unused images scan (not daily to save resources)
     cron.schedule("0 3 */3 * *", async () => {
-      console.log("Starting unused image scan...");
-
       try {
         const referencedImages = await getReferencedImages();
         const allFiles = listFiles(UPLOADS_DIR);
@@ -421,9 +418,6 @@ async function run() {
         });
 
         if (unusedFiles.length) {
-          console.log(
-            `Found ${unusedFiles.length} unused images. Moving to backup...`,
-          );
           await sendEmail(
             process.env.SUPER_ADMIN,
             `System Maintenance Update: Image Backup Started
@@ -448,7 +442,7 @@ async function run() {
           );
           moveUnusedImages(unusedFiles);
         } else {
-          console.log("No unused images found.");
+          console.log("No unused images found during scan.");
         }
       } catch (err) {
         console.error("Error during scan:", err);
@@ -6041,79 +6035,119 @@ ORDER BY f.followed_at DESC;
     // ------------ Cart API Routes ----------------//
 
     // POST: Create Cart API Route
+
     app.post("/carts", async (req, res) => {
       try {
         const { email } = req.query;
         const cartId = uuidv4();
         const { sellerId, productInfo, deliveries } = req.body;
 
-        const existingQuery =
-          "SELECT * FROM carts WHERE user_email=$1 AND sellerId=$2";
+        const existingQuery = `
+      SELECT *
+      FROM carts
+      WHERE user_email = $1
+      AND sellerId = $2
+    `;
 
         const existingCartResult = await pool.query(existingQuery, [
           email,
           sellerId,
         ]);
 
+        // Helper function to compare product + variant
+        const isSameProduct = (existing, incoming) => {
+          return (
+            existing.product_Id === incoming.product_Id &&
+            JSON.stringify(existing.variants) ===
+              JSON.stringify(incoming.variants) &&
+            existing.product_img === incoming.product_img
+          );
+        };
+
+        // =========================
+        // Cart already exists
+        // =========================
         if (existingCartResult.rowCount > 0) {
           const existingCart = existingCartResult.rows[0];
 
-          // ✅ define existingProducts properly
-          const existingProducts = existingCart.productinfo;
-          const existingProductIds = existingProducts.map((p) => p.product_Id);
+          const existingProducts = existingCart.productinfo || [];
 
-          const newProducts = productInfo.filter(
-            (p) => !existingProductIds.includes(p.product_Id),
-          );
+          // Filter only new products
+          const newProducts = productInfo.filter((incomingProduct) => {
+            return !existingProducts.some((existingProduct) =>
+              isSameProduct(existingProduct, incomingProduct),
+            );
+          });
 
+          // All products already exist
           if (newProducts.length === 0) {
-            return res
-              .status(200)
-              .json({ message: "Product already in cart!" });
+            return res.status(200).json({
+              message: "Product already in cart!",
+            });
           }
 
-          const updatedCart = [...existingProducts, ...newProducts];
+          // Merge old + new
+          const updatedProducts = [...existingProducts, ...newProducts];
+
           const updateCartQuery = `
         UPDATE carts
-        SET productInfo = $1
-        WHERE cart_id = $2
+        SET productInfo = $1,
+            deliveries = $2
+        WHERE cart_id = $3
       `;
+
           const updateCartResult = await pool.query(updateCartQuery, [
-            JSON.stringify(updatedCart),
+            JSON.stringify(updatedProducts),
+            JSON.stringify(deliveries),
             existingCart.cart_id,
           ]);
 
-          res.status(200).json({
+          return res.status(200).json({
             message: "Cart updated successfully!",
             updatedCount: updateCartResult.rowCount,
           });
-        } else {
-          const insertCartQuery = `
-        INSERT INTO carts (cart_id,user_email,sellerId,productInfo,deliveries)
-        VALUES ($1,$2,$3,$4,$5);
-      `;
-          const insertCartQueryValues = [
-            cartId,
-            email,
-            sellerId,
-            JSON.stringify(productInfo),
-            deliveries,
-          ];
-          const insertCartResult = await pool.query(
-            insertCartQuery,
-            insertCartQueryValues,
-          );
-
-          res.status(201).json({
-            message: "Cart created successfully!",
-            createdCount: insertCartResult.rowCount,
-          });
         }
+
+        // =========================
+        // Create new cart
+        // =========================
+        const insertCartQuery = `
+      INSERT INTO carts
+      (
+        cart_id,
+        user_email,
+        sellerId,
+        productInfo,
+        deliveries
+      )
+      VALUES ($1,$2,$3,$4,$5)
+    `;
+
+        const insertValues = [
+          cartId,
+          email,
+          sellerId,
+          JSON.stringify(productInfo),
+          JSON.stringify(deliveries),
+        ];
+
+        const insertCartResult = await pool.query(
+          insertCartQuery,
+          insertValues,
+        );
+
+        return res.status(201).json({
+          message: "Cart created successfully!",
+          createdCount: insertCartResult.rowCount,
+        });
       } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error(error);
+
+        return res.status(500).json({
+          message: error.message,
+        });
       }
     });
-
     app.get(
       "/carts",
       passport.authenticate("jwt", { session: false }),
@@ -6140,7 +6174,6 @@ WHERE c.user_email = $1;
     `;
 
           const result = await pool.query(query, [email]);
-
           res.status(200).json({
             message: "Carts route is working!",
             carts: result.rows,
@@ -6174,7 +6207,7 @@ WHERE c.user_email = $1;
     // ✅ PATCH route for updating quantity inside JSONB productInfo
     app.patch("/carts/update-qty", async (req, res) => {
       try {
-        const { cartId, productId, newQty } = req.body;
+        const { cartId, productId, newQty, variants, productImg } = req.body;
 
         if (!cartId || !productId || typeof newQty !== "number" || newQty < 1) {
           return res.status(400).json({ message: "Invalid data" });
@@ -6191,10 +6224,23 @@ WHERE c.user_email = $1;
         const productInfo = cartResult.rows[0].productinfo;
 
         // Step 2: Update qty inside JSON in JS
-        const updatedInfo = productInfo.map((item) =>
-          item.product_Id === productId ? { ...item, qty: newQty } : item,
-        );
+        // const updatedInfo = productInfo.map((item) =>
+        //   item.product_Id === productId ? { ...item, qty: newQty } : item,
+        // );
+        const updatedInfo = productInfo.map((item) => {
+          if (
+            item.product_Id === productId &&
+            JSON.stringify(item.variants) === JSON.stringify(variants) &&
+            item.product_img === productImg
+          ) {
+            return {
+              ...item,
+              qty: newQty,
+            };
+          }
 
+          return item;
+        });
         // Step 3: Save updated JSON back to DB
         const updateQuery =
           "UPDATE carts SET productinfo = $1 WHERE cart_id = $2 RETURNING *";
@@ -6215,7 +6261,7 @@ WHERE c.user_email = $1;
 
     app.patch("/carts/remove-product", async (req, res) => {
       try {
-        const { cartId, productId } = req.body;
+        const { cartId, productId, variants, productImg } = req.body;
 
         if (!cartId || !productId) {
           return res.status(400).json({ message: "Invalid data" });
@@ -6233,9 +6279,13 @@ WHERE c.user_email = $1;
         const productInfo = cart.productinfo;
 
         // Step 2: Filter out the product to remove
-        const updatedInfo = productInfo.filter(
-          (item) => item.product_Id !== productId,
-        );
+        const updatedInfo = productInfo.filter((item) => {
+          return !(
+            item.product_Id === productId &&
+            JSON.stringify(item.variants) === JSON.stringify(variants) &&
+            item.product_img === productImg
+          );
+        });
 
         // Step 3: যদি সব প্রোডাক্ট বাদ পড়ে যায় → পুরো cart মুছে ফেল
         if (updatedInfo.length === 0) {
@@ -6279,7 +6329,10 @@ WHERE c.user_email = $1;
         // প্রতিটা কার্টে productinfo আপডেট করা
         for (let cart of carts) {
           let updatedProducts = cart.productinfo.filter(
-            (p) => !ids.includes(p.product_Id),
+            (p) =>
+              !ids.includes(
+                `${p.product_Id}-${p.product_img}-${JSON.stringify(p.variants)}`,
+              ),
           );
 
           if (updatedProducts.length === 0) {
@@ -6294,7 +6347,7 @@ WHERE c.user_email = $1;
           } else {
             const updatedResult = await pool.query(
               "UPDATE carts SET productinfo = $1 WHERE cart_id = $2",
-              [JSON.stringify(updatedProducts), cart.cartid],
+              [JSON.stringify(updatedProducts), cart.cart_id],
             );
             res.status(200).json({
               message: "Products deleted successfully",
@@ -8446,7 +8499,6 @@ WHERE customer_email = $1;
 
         res.status(200).json({ success: true, message: result.rows[0] });
       } catch (err) {
-        console.log(err);
         res.status(500).json({ success: false, error: err.message });
       }
     });
